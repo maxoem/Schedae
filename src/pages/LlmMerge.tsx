@@ -326,7 +326,7 @@ export default function LlmMerge() {
                     </div>
                   ) : (
                     <ScrollArea className="h-full w-full border-t">
-                      <pre className="min-h-full p-4 font-mono text-[12px] leading-relaxed whitespace-pre text-foreground selection:bg-zinc-200">
+                      <pre className="min-h-full p-4 font-mono text-[12px] leading-relaxed whitespace-pre text-foreground selection:bg-blue-500/30 dark:selection:bg-blue-400/40">
                         {mergedJson ? JSON.stringify(mergedJson, null, 2) : "Syntax error during merge. Verify Markdown card ID structure."}
                       </pre>
                     </ScrollArea>

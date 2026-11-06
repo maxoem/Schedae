@@ -286,7 +286,7 @@ export default function SyntaxEditor({
           spellCheck={false}
           className={cn(
             "absolute inset-0 w-full h-full p-3 bg-transparent resize-none outline-none border-0 leading-[21px]",
-            "text-transparent caret-primary selection:bg-primary/20 selection:text-transparent",
+            "text-transparent caret-primary selection:bg-blue-500/30 dark:selection:bg-blue-400/40 selection:text-transparent",
             "disabled:opacity-50 disabled:cursor-not-allowed",
             "overflow-auto scrollbar-thin",
           )}
