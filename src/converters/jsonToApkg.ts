@@ -272,8 +272,12 @@ export function formatMarkdownForAnki(content: string): string {
   // 3. Clean up existing raw <br> tags in markdown to standard newlines
   str = str.replace(/<br\s*[\/]?[^>]*>/gi, "\n");
 
-  // Protect math formulas and code blocks so that internal newlines in LaTeX matrices
-  // or aligned equations are never corrupted with <br> or backslash removals
+  // 4. Repair escaped environment asterisks (e.g. \begin{align\*} -> \begin{align*})
+  str = str.replace(/\\begin\{([a-zA-Z]+)\\\*\}/gi, "\\begin{$1*}");
+  str = str.replace(/\\end\{([a-zA-Z]+)\\\*\}/gi, "\\end{$1*}");
+
+  // Protect math formulas and code blocks so that internal newlines in LaTeX matrices,
+  // bracketed display math, or aligned equations are never corrupted with <br> or backslash removals
   const placeholders: string[] = [];
   const protect = (match: string) => {
     const idx = placeholders.length;
@@ -281,23 +285,38 @@ export function formatMarkdownForAnki(content: string): string {
     return `XPROTECTEDCHUNK${idx}X`;
   };
 
+  // Step A: Protect existing delimited blocks and code blocks
   str = str.replace(/```[\s\S]*?```/g, protect);
   str = str.replace(/\$\$[\s\S]*?\$\$/g, protect);
-  str = str.replace(/\\begin\{([a-z*]+)\}[\s\S]*?\\end\{\1\}/gi, protect);
+  str = str.replace(/\\{1,2}\[[\s\S]*?\\{1,2}\]/g, protect);
+  str = str.replace(/\\{1,2}\([^\n]*?\\{1,2}\)/g, protect);
   str = str.replace(/\\?<anki-mathjax[^>]*>[\s\S]*?\\?<\/anki-mathjax>/gi, protect);
   str = str.replace(/\$[^$\n]+?\$/g, protect);
 
-  // 4. Clean up stray backslash lines and trailing backslashes outside math
+  // Step B: Wrap any remaining bare LaTeX display environments in display math ($$...$$).
+  // Because all existing math delimiters ($$, \[, \(, <anki-mathjax>, $) and code blocks are
+  // already replaced with placeholders, any \begin{...}...\end{\1} matched here is strictly bare.
+  const BARE_ENV_REGEX =
+    /\\begin\{(align\*?|alignat\*?|equation\*?|gather\*?|multline\*?|flalign\*?|split|pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix|matrix|cases|dcases|rcases|drcases|aligned|alignedat\*?|gathered|array|CD)\}([\s\S]*?)\\end\{\1\}/gi;
+
+  str = str.replace(BARE_ENV_REGEX, (match) => {
+    return protect(`$$\n${match.trim()}\n$$`);
+  });
+
+  // Step C: Protect any remaining generic \begin{...}...\end{...} environments so their contents are preserved
+  str = str.replace(/\\begin\{([a-zA-Z*]+)\}[\s\S]*?\\end\{\1\}/gi, protect);
+
+  // 5. Clean up stray backslash lines and trailing backslashes outside math
   str = str.replace(/(^|\n)\s*\\+\s*(?=\n|$)/g, "$1");
   str = str.replace(/([^\\])\\+[ \t]*(?=\n|$)/g, "$1");
 
-  // 5. Normalize accidental single-space indentation before list markers (leaves 2+ spaces / tabs intact)
+  // 6. Normalize accidental single-space indentation before list markers (leaves 2+ spaces / tabs intact)
   str = str.replace(/(^|\n) ([*+-]|\d+\.) /g, "$1$2 ");
 
-  // 6. Normalize multiple blank lines to clean double newlines
+  // 7. Normalize multiple blank lines to clean double newlines
   str = str.replace(/\n{3,}/g, "\n\n");
 
-  // 7. Convert newlines to Anki HTML breaks (<br>)
+  // 8. Convert newlines to Anki HTML breaks (<br>)
   str = str.replace(/\n/g, "<br>");
 
   // Restore protected chunks

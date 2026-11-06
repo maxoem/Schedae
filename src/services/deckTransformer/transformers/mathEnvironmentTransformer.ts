@@ -7,7 +7,7 @@ export class MathEnvironmentTransformer implements ContentTransformer {
   readonly order = 30;
 
   private static readonly BARE_ENV_REGEX =
-    /\\begin\{(align\*?|alignat\*?|equation\*?|gather\*?|multline\*?|flalign\*?|pmatrix|bmatrix|vmatrix|Vmatrix|matrix|cases|aligned|array)\}([\s\S]*?)\\end\{\1\}/gi;
+    /\\begin\{(align\*?|alignat\*?|equation\*?|gather\*?|multline\*?|flalign\*?|split|pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix|matrix|cases|dcases|rcases|drcases|aligned|alignedat\*?|gathered|array|CD)\}([\s\S]*?)\\end\{\1\}/gi;
 
   private static readonly ANKI_MATHJAX_REGEX =
     /\\?<anki-mathjax/i;
