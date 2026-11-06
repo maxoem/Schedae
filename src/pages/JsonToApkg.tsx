@@ -11,12 +11,23 @@ import { AlertCircle, X, FileText, Layers } from "lucide-react";
 
 export default function JsonToApkg() {
   const [mobileActiveTab, setMobileActiveTab] = useState<"source" | "preview">("source");
+  const [sheetActiveTab, setSheetActiveTab] = useState<"card" | "parser">("card");
   const ai = useAiSettings();
   const abortRef = useRef<AbortController | null>(null);
 
   const workspace = useDeckWorkspace(ai.stencil);
 
-  // Keyboard shortcuts (Ctrl+Enter to save batch, Ctrl+S to export, Ctrl+M to toggle rules)
+  const handleOpenParserSettings = useCallback(() => {
+    setSheetActiveTab("parser");
+    workspace.setIsSheetOpen(true);
+  }, [workspace]);
+
+  const handleOpenCardSettings = useCallback(() => {
+    setSheetActiveTab("card");
+    workspace.setIsSheetOpen(true);
+  }, [workspace]);
+
+  // Keyboard shortcuts (Ctrl+Enter to save batch, Ctrl+S to export, Ctrl+M to toggle rules/settings)
   useKeyboardShortcuts({
     onCompile: () => {
       if (workspace.draftCards.length > 0) {
@@ -29,6 +40,9 @@ export default function JsonToApkg() {
       }
     },
     onToggleMarkers: () => {
+      if (!workspace.isSheetOpen) {
+        setSheetActiveTab("card");
+      }
       workspace.setIsSheetOpen((prev) => !prev);
     },
   });
@@ -69,7 +83,7 @@ export default function JsonToApkg() {
           savedCount={workspace.deckCards.length}
           isProcessing={workspace.isProcessing || ai.isStreamingActive}
           onExport={workspace.exportApkg}
-          onOpenParserSettings={() => workspace.setIsSheetOpen(true)}
+          onOpenParserSettings={handleOpenCardSettings}
           hasCustomRules={Boolean(ai.stencil) || workspace.parserRule === "custom"}
         />
 
@@ -150,7 +164,7 @@ export default function JsonToApkg() {
               hasCustomRules={Boolean(ai.stencil) || workspace.parserRule === "custom"}
               onLoadSample={workspace.loadSample}
               onClear={workspace.clearSource}
-              onOpenParserSettings={() => workspace.setIsSheetOpen(true)}
+              onOpenParserSettings={handleOpenParserSettings}
               onAddToDeck={workspace.addCurrentAsBatch}
               onViewPreview={() => setMobileActiveTab("preview")}
               isProcessing={workspace.isProcessing}
@@ -180,7 +194,9 @@ export default function JsonToApkg() {
               onClearDeck={workspace.clearDeck}
               onSaveDraftToDeck={workspace.addCurrentAsBatch}
               onLoadSample={workspace.loadSample}
-              onOpenParserSettings={() => workspace.setIsSheetOpen(true)}
+              onOpenParserSettings={handleOpenParserSettings}
+              onOpenCardSettings={handleOpenCardSettings}
+              extractTopicBadges={workspace.extractTopicBadges}
               onBackToSource={() => setMobileActiveTab("source")}
               diagnostics={workspace.parseResult.diagnostics}
             />
@@ -191,15 +207,21 @@ export default function JsonToApkg() {
         <WorkspaceParserSheet
           open={workspace.isSheetOpen}
           onOpenChange={workspace.setIsSheetOpen}
+          activeTab={sheetActiveTab}
+          onActiveTabChange={setSheetActiveTab}
           parserMode={workspace.parserMode}
           onParserModeChange={workspace.setParserMode}
           selectedModel={workspace.selectedModel}
           onModelChange={workspace.setSelectedModel}
           validateJson={workspace.validateJson}
           onValidateJsonChange={workspace.setValidateJson}
+          extractTopicBadges={workspace.extractTopicBadges}
+          onExtractTopicBadgesChange={workspace.setExtractTopicBadges}
           splitSettings={workspace.splitSettings}
           onSplitSettingsChange={workspace.setSplitSettings}
           sampleText={workspace.sourceText}
+          selectedTemplate={workspace.selectedTemplate}
+          onTemplateChange={workspace.setSelectedTemplate}
           aiSettings={ai}
           onDeriveStencil={handleAnalyzeStructure}
           clearStencil={handleClearStencil}

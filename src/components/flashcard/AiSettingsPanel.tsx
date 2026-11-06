@@ -411,18 +411,18 @@ export function AiSettingsPanel({
 
       {/* Stencil indicator */}
       {stencilActive && (
-        <div className="flex items-center gap-3 p-3 rounded-lg bg-emerald-500/[0.04] border border-emerald-500/10">
-          <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+        <div className="flex items-center gap-3 p-3 rounded-lg bg-emerald-50 border border-emerald-200/80">
+          <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
           <div className="flex-1 min-w-0">
-            <div className="text-xs font-semibold text-emerald-600/80">Stencil Active</div>
-            <div className="text-xs text-emerald-600/50 truncate mt-0.5">
+            <div className="text-xs font-semibold text-emerald-800">Stencil Active</div>
+            <div className="text-[11px] text-emerald-700/80 truncate mt-0.5">
               Using derived extraction path from previous analysis
             </div>
           </div>
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 px-2 text-destructive hover:text-destructive hover:bg-destructive/10 text-xs"
+            className="h-7 px-2 text-destructive hover:text-destructive hover:bg-destructive/10 text-xs cursor-pointer"
             onClick={clearStencil}
             disabled={!settings.stencil}
           >
@@ -434,11 +434,11 @@ export function AiSettingsPanel({
 
       {/* Target Model Normalizer Selector */}
       <div className="space-y-1.5">
-        <Label className="text-xs font-semibold text-foreground/80 cursor-default">Target Model Normalizer</Label>
+        <Label className="text-xs font-semibold text-zinc-900 cursor-default">Target Model Normalizer</Label>
         <select
           value={settings.selectedModel}
           onChange={(e) => settings.setSelectedModel(e.target.value as AiModelPresetId)}
-          className="w-full h-8.5 rounded-lg border border-border bg-background px-3 text-xs focus:ring-1 focus:ring-primary focus:border-primary transition-colors cursor-pointer text-foreground"
+          className="w-full h-8 rounded-lg border border-zinc-200 bg-white px-2.5 text-xs text-zinc-800 focus:ring-1 focus:ring-zinc-900 focus:outline-hidden transition-colors cursor-pointer"
         >
           {(Object.keys(AI_MODEL_PRESETS) as AiModelPresetId[]).map((id) => (
             <option key={id} value={id}>
@@ -449,16 +449,16 @@ export function AiSettingsPanel({
       </div>
 
       {/* Local LLM Model configuration - directly written */}
-      <div className="space-y-4 pt-2 border-t border-border/50">
+      <div className="space-y-4 pt-2 border-t border-zinc-200/60">
         {/* LLM Model selector */}
         <div className="space-y-1.5">
           <div className="flex items-center gap-1.5">
-            <Radio className="w-4 h-4 text-muted-foreground/60" />
-            <Label className="text-xs font-semibold text-foreground/80 cursor-default">Local LLM Model</Label>
+            <Radio className="w-4 h-4 text-zinc-500" />
+            <Label className="text-xs font-semibold text-zinc-900 cursor-default">Local LLM Model</Label>
           </div>
           <div className="flex gap-2">
             <select
-              className="flex-1 h-8 rounded-md border bg-background px-2.5 text-sm focus:ring-1 focus:ring-primary focus:border-primary transition-colors"
+              className="flex-1 h-8 rounded-md border border-zinc-200 bg-white px-2.5 text-xs text-zinc-900 focus:ring-1 focus:ring-zinc-900 focus:outline-hidden transition-colors cursor-pointer"
               value={settings.selectedLlmModel ?? ""}
               onChange={(e) => settings.setSelectedLlmModel(e.target.value || null)}
               disabled={settings.llmModelsLoading || settings.llmModels.length === 0}
@@ -477,28 +477,28 @@ export function AiSettingsPanel({
               variant="outline"
               onClick={settings.fetchLlmModels}
               disabled={settings.llmModelsLoading}
-              className="h-8 px-2.5"
+              className="h-8 px-2.5 border-zinc-200 text-zinc-700 hover:bg-zinc-50 cursor-pointer"
             >
               {settings.llmModelsLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
             </Button>
           </div>
           {!settings.llmModels.length && !settings.llmModelsLoading && (
-            <p className="text-xs text-muted-foreground/60 leading-relaxed mt-1">
+            <p className="text-[11px] text-zinc-500 leading-relaxed mt-1">
               No local LLM models detected. Start Ollama and ensure at least one model is available.
             </p>
           )}
         </div>
 
         {/* Streaming toggle */}
-        <div className="flex items-start justify-between px-3 py-2.5 rounded-lg bg-muted/40 border border-border/40">
+        <div className="flex items-start justify-between py-1">
           <div className="flex flex-col gap-0.5">
             <div className="flex items-center gap-1.5">
-              <Waves className="w-3.5 h-3.5 text-muted-foreground/60" />
-              <Label htmlFor="llm-stream" className="text-xs font-medium text-foreground cursor-pointer">
+              <Waves className="w-3.5 h-3.5 text-zinc-500" />
+              <Label htmlFor="llm-stream" className="text-xs font-medium text-zinc-900 cursor-pointer">
                 Enable Streaming
               </Label>
             </div>
-            <span className="text-xs text-muted-foreground leading-relaxed pl-5">
+            <span className="text-[11px] text-zinc-500 leading-relaxed pl-5">
               Stream model output in real-time as it generates
             </span>
           </div>
@@ -507,15 +507,14 @@ export function AiSettingsPanel({
 
         {/* Analyze action */}
         <Button
-          variant="outline"
           size="sm"
-          className="w-full gap-2 h-9 text-xs font-semibold bg-gradient-to-r from-purple-500/10 to-primary/10 hover:from-purple-500/15 hover:to-primary/15 border-purple-500/20 hover:border-purple-500/30 text-foreground"
+          className="w-full gap-2 h-8.5 text-xs font-semibold bg-zinc-900 text-white hover:bg-zinc-800 shadow-xs transition-colors cursor-pointer"
           onClick={onDeriveStencil}
           disabled={!hasInput || isProcessing}
         >
-          <Brain className="w-4 h-4 text-purple-500/70" />
-          {isProcessing ? "Analyzing..." : "Analyze Structure & Derive Stencil"}
-          {!hasInput && <Badge variant="secondary" className="ml-1 h-4 px-1.5 text-[10px]">No input text</Badge>}
+          {isProcessing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Brain className="w-3.5 h-3.5" />}
+          <span>{isProcessing ? "Analyzing Structure..." : "Analyze Structure & Derive Stencil"}</span>
+          {!hasInput && <Badge variant="secondary" className="ml-1 h-4 px-1.5 text-[10px] bg-zinc-800 text-zinc-300">No input text</Badge>}
         </Button>
       </div>
     </div>
@@ -530,10 +529,12 @@ function Toggle({
   checked,
   onChange,
   id,
+  disabled,
 }: {
   checked: boolean;
   onChange: (v: boolean) => void;
   id?: string;
+  disabled?: boolean;
 }) {
   return (
     <button
@@ -541,13 +542,14 @@ function Toggle({
       role="switch"
       aria-checked={checked}
       type="button"
+      disabled={disabled}
       onClick={() => onChange(!checked)}
-      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ${
-        checked ? "bg-primary" : "bg-zinc-200"
-      }`}
+      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-zinc-900/20 ${
+        checked ? "bg-zinc-900" : "bg-zinc-200"
+      } ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
     >
       <span
-        className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow-lg ring-0 transition-transform duration-200 ${
+        className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow-xs ring-0 transition-transform duration-200 ${
           checked ? "translate-x-4" : "translate-x-0"
         }`}
       />

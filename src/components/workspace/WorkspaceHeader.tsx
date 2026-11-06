@@ -115,7 +115,7 @@ export function WorkspaceHeader({
               title="Configure delimiters and parsing rules (Ctrl+M)"
             >
               <SlidersHorizontal className="w-3.5 h-3.5 text-zinc-500" />
-              <span className="hidden sm:inline">Parser Rules</span>
+              <span className="hidden sm:inline">Settings</span>
               {hasCustomRules && (
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" title="Custom rules active" />
               )}

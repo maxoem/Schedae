@@ -85,6 +85,70 @@ describe("Markdown & KaTeX Template Rendering", () => {
     );
   });
 
+  test("formatMarkdownForAnki preserves LaTeX square bracket and inline delimiters without corrupting row breaks", () => {
+    // 1. Multi-line display math with square brackets \[...\] and row breaks \\
+    const inputWithDisplay =
+      "Solve the system:\n" +
+      "\\[\n" +
+      "\\begin{aligned}\n" +
+      "2x + y &= 5 \\\\\n" +
+      "x - y &= 1\n" +
+      "\\end{aligned}\n" +
+      "\\]\n" +
+      "Result follows.";
+
+    const formattedDisplay = formatMarkdownForAnki(inputWithDisplay);
+    assert.ok(
+      formattedDisplay.includes(
+        "\\[\n\\begin{aligned}\n2x + y &= 5 \\\\\nx - y &= 1\n\\end{aligned}\n\\]"
+      ),
+      "Display math inside \\[...\\] must preserve \\\\ row breaks and newlines intact"
+    );
+    assert.ok(!formattedDisplay.includes("aligned<br>"), "Must not insert <br> inside \\[...\\]");
+    assert.ok(formattedDisplay.startsWith("Solve the system:<br>"));
+    assert.ok(formattedDisplay.endsWith("<br>Result follows."));
+
+    // 2. Inline LaTeX parenthesized math \(...\)
+    const inputWithInline = "Consider the function \\( f(x) = x^2 \\) for all \\( x \\in \\mathbb{R} \\).";
+    const formattedInline = formatMarkdownForAnki(inputWithInline);
+    assert.equal(formattedInline, inputWithInline, "Inline \\(...\\) math must be preserved untouched");
+  });
+
+  test("formatMarkdownForAnki wraps bare LaTeX environments in display math and repairs asterisks without double-wrapping", () => {
+    // 1. Bare pmatrix environment wrapped in $$
+    const bareMatrix =
+      "Matrix definition:\n" +
+      "\\begin{pmatrix}\n" +
+      "1 & 0 \\\\\n" +
+      "0 & 1\n" +
+      "\\end{pmatrix}\n" +
+      "End of matrix.";
+
+    const formattedBare = formatMarkdownForAnki(bareMatrix);
+    assert.ok(
+      formattedBare.includes("$$\n\\begin{pmatrix}\n1 & 0 \\\\\n0 & 1\n\\end{pmatrix}\n$$"),
+      "Bare pmatrix must be wrapped in $$ display math"
+    );
+    assert.ok(!formattedBare.includes("pmatrix<br>"), "No <br> inside pmatrix");
+
+    // 2. Already wrapped environment must NOT be double-wrapped
+    const alreadyWrapped =
+      "$$\\begin{pmatrix}\n1 & 0 \\\\\n0 & 1\n\\end{pmatrix}$$";
+    const formattedWrapped = formatMarkdownForAnki(alreadyWrapped);
+    assert.ok(!formattedWrapped.includes("$$$$"), "Must not create $$$$ double delimiters");
+
+    // 3. Corrupted escaped asterisk
+    const corruptedAsterisk =
+      "\\begin{align\\*}\n" +
+      "a &= b \\\\\n" +
+      "c &= d\n" +
+      "\\end{align\\*}";
+    const formattedAsterisk = formatMarkdownForAnki(corruptedAsterisk);
+    assert.ok(formattedAsterisk.includes("\\begin{align*}"), "Escaped asterisk must be repaired");
+    assert.ok(formattedAsterisk.includes("\\end{align*}"), "Escaped end asterisk must be repaired");
+    assert.ok(formattedAsterisk.includes("$$\n\\begin{align*}"), "Repaired environment must be wrapped in $$");
+  });
+
   test("normalizeMathMarkdown handles LaTeX and Anki MathJax delimiters", () => {
     // Inline math
     const inline = "Ein Programm lernt aus Erfahrung \\(E\\) bezüglich Aufgaben \\(T\\)";

@@ -1,14 +1,17 @@
 import type {
   ContentTransformer,
+  CardTransformer,
   TransformationConfig,
   TransformationContext,
 } from "./types";
+import type { FlashCard } from "@/converters/types";
 import { DEFAULT_TRANSFORMATION_CONFIG } from "./types";
 import { FieldLabelTransformer } from "./transformers/fieldLabelTransformer";
 import { HtmlToMarkdownTransformer } from "./transformers/htmlToMarkdownTransformer";
 import { MathEnvironmentTransformer } from "./transformers/mathEnvironmentTransformer";
 import { ListBulletTransformer } from "./transformers/listBulletTransformer";
 import { WhitespaceTransformer } from "./transformers/whitespaceTransformer";
+import { TopicBadgeTransformer } from "./transformers/topicBadgeTransformer";
 
 export interface TransformationReport {
   appliedTransformers: string[];
@@ -19,12 +22,22 @@ export interface TransformationReport {
 
 export class DeckTransformerService {
   private transformers: ContentTransformer[] = [];
+  private cardTransformers: CardTransformer[] = [];
 
-  constructor(customTransformers?: ContentTransformer[]) {
-    if (customTransformers && customTransformers.length > 0) {
-      this.transformers = [...customTransformers].sort((a, b) => (a.order ?? 50) - (b.order ?? 50));
+  constructor(
+    customContentTransformers?: ContentTransformer[],
+    customCardTransformers?: CardTransformer[]
+  ) {
+    if (customContentTransformers && customContentTransformers.length > 0) {
+      this.transformers = [...customContentTransformers].sort((a, b) => (a.order ?? 50) - (b.order ?? 50));
     } else {
       this.transformers = this.createDefaultTransformers();
+    }
+
+    if (customCardTransformers && customCardTransformers.length > 0) {
+      this.cardTransformers = [...customCardTransformers].sort((a, b) => (a.order ?? 50) - (b.order ?? 50));
+    } else {
+      this.cardTransformers = this.createDefaultCardTransformers();
     }
   }
 
@@ -38,8 +51,14 @@ export class DeckTransformerService {
     ].sort((a, b) => (a.order ?? 50) - (b.order ?? 50));
   }
 
+  private createDefaultCardTransformers(): CardTransformer[] {
+    return [
+      new TopicBadgeTransformer(),
+    ].sort((a, b) => (a.order ?? 50) - (b.order ?? 50));
+  }
+
   /**
-   * Registers a new transformer or replaces an existing transformer with the same id.
+   * Registers a new content transformer or replaces an existing one with the same id.
    */
   registerTransformer(transformer: ContentTransformer): void {
     const existingIdx = this.transformers.findIndex((t) => t.id === transformer.id);
@@ -52,7 +71,7 @@ export class DeckTransformerService {
   }
 
   /**
-   * Unregisters a transformer by id.
+   * Unregisters a content transformer by id.
    */
   unregisterTransformer(id: string): boolean {
     const initialLen = this.transformers.length;
@@ -61,10 +80,39 @@ export class DeckTransformerService {
   }
 
   /**
-   * Returns list of currently registered transformers.
+   * Returns list of currently registered content transformers.
    */
   getTransformers(): readonly ContentTransformer[] {
     return [...this.transformers];
+  }
+
+  /**
+   * Registers a new card-level transformer or replaces an existing one with the same id.
+   */
+  registerCardTransformer(transformer: CardTransformer): void {
+    const existingIdx = this.cardTransformers.findIndex((t) => t.id === transformer.id);
+    if (existingIdx >= 0) {
+      this.cardTransformers[existingIdx] = transformer;
+    } else {
+      this.cardTransformers.push(transformer);
+    }
+    this.cardTransformers.sort((a, b) => (a.order ?? 50) - (b.order ?? 50));
+  }
+
+  /**
+   * Unregisters a card-level transformer by id.
+   */
+  unregisterCardTransformer(id: string): boolean {
+    const initialLen = this.cardTransformers.length;
+    this.cardTransformers = this.cardTransformers.filter((t) => t.id !== id);
+    return this.cardTransformers.length < initialLen;
+  }
+
+  /**
+   * Returns list of currently registered card-level transformers.
+   */
+  getCardTransformers(): readonly CardTransformer[] {
+    return [...this.cardTransformers];
   }
 
   /**
@@ -72,6 +120,8 @@ export class DeckTransformerService {
    */
   private isTransformerEnabled(transformerId: string, config: TransformationConfig): boolean {
     switch (transformerId) {
+      case "topic-badges":
+        return config.extractTopicBadges !== false;
       case "field-labels":
         return config.stripFieldLabels;
       case "html-to-markdown":
@@ -86,6 +136,44 @@ export class DeckTransformerService {
         // Any custom registered transformer is enabled by default
         return true;
     }
+  }
+
+  /**
+   * Transforms a whole card through card-level transformers (e.g. topic badges)
+   * and optionally through field-level content transformers on front and back.
+   */
+  transformCard(
+    card: FlashCard,
+    config: TransformationConfig = DEFAULT_TRANSFORMATION_CONFIG,
+    context?: TransformationContext
+  ): FlashCard {
+    if (!card) return card;
+
+    let current = { ...card };
+
+    // 1. Apply CardTransformers (multi-field coordination, topic badge extraction)
+    for (const transformer of this.cardTransformers) {
+      if (!this.isTransformerEnabled(transformer.id, config)) {
+        continue;
+      }
+      if (transformer.canTransform(current, context)) {
+        current = transformer.transform(current, context);
+      }
+    }
+
+    return current;
+  }
+
+  /**
+   * Transforms a collection of cards through the card transformation pipeline.
+   */
+  transformCards(
+    cards: FlashCard[],
+    config: TransformationConfig = DEFAULT_TRANSFORMATION_CONFIG,
+    context?: TransformationContext
+  ): FlashCard[] {
+    if (!cards || !Array.isArray(cards)) return [];
+    return cards.map((card) => this.transformCard(card, config, context));
   }
 
   /**

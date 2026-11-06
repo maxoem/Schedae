@@ -882,7 +882,7 @@ export default function DeckConverter() {
                   <ScrollArea className="absolute inset-x-0 bottom-0 top-[45px] w-full h-full">
                     <pre
                       aria-label="JSON Output"
-                      className="inline-block min-w-full bg-transparent p-5 font-mono text-[13px] leading-relaxed whitespace-pre text-foreground selection:bg-primary/20"
+                      className="inline-block min-w-full bg-transparent p-5 font-mono text-[13px] leading-relaxed whitespace-pre text-foreground selection:bg-blue-500/30 dark:selection:bg-blue-400/40"
                     >
                       {previewContent}
                     </pre>

@@ -1,6 +1,7 @@
 import type { FlashCard } from "@/converters/types";
 import type { SplitSettings } from "@/components/flashcard/SplitSettingsDialog";
 import type { Stencil } from "@/lib/extraction/types";
+import type { TransformationConfig } from "@/services/deckTransformer/types";
 
 export type DetectedFormat =
   | "json"
@@ -36,6 +37,8 @@ export interface ExtractorOptions {
   normalizeModel?: "auto" | "gemini" | "chatgpt" | "claude";
   parserMode?: "regex" | "heuristic";
   extractorId?: string;
+  extractTopicBadges?: boolean;
+  transformConfig?: TransformationConfig;
 }
 
 export interface ExtractorStrategy {

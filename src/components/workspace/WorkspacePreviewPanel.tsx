@@ -15,6 +15,7 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronsUpDown,
+  SlidersHorizontal,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -51,6 +52,8 @@ interface WorkspacePreviewPanelProps {
   onSaveDraftToDeck: () => void;
   onLoadSample: (sampleId: string) => void;
   onOpenParserSettings: () => void;
+  onOpenCardSettings?: () => void;
+  extractTopicBadges?: boolean;
   onBackToSource?: () => void;
   diagnostics: DiagnosticIssue[];
 }
@@ -71,6 +74,8 @@ export function WorkspacePreviewPanel({
   onSaveDraftToDeck,
   onLoadSample,
   onOpenParserSettings,
+  onOpenCardSettings,
+  extractTopicBadges = true,
   onBackToSource,
   diagnostics,
 }: WorkspacePreviewPanelProps) {
@@ -166,23 +171,41 @@ export function WorkspacePreviewPanel({
           </span>
         </div>
 
-        {/* Right: Template Picker + Segmented View Control [List | Flip] + Isolated Clear Deck */}
+        {/* Right: Docked Template Picker & Card Settings + Segmented View Control [List | Flip] + Isolated Clear Deck */}
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-          {/* Card Template Picker */}
-          <div className="flex items-center gap-1 bg-background/90 border border-border/80 rounded-md px-1.5 sm:px-2 h-7 text-xs shadow-2xs">
-            <span className="text-muted-foreground font-medium text-[11px] hidden md:inline">Template:</span>
-            <select
-              value={selectedTemplate}
-              onChange={(e) => onTemplateChange(e.target.value as CardTemplateId)}
-              className="bg-transparent font-medium text-foreground focus:outline-hidden cursor-pointer py-0.5 text-xs max-w-[110px] xs:max-w-[140px] sm:max-w-[190px] md:max-w-none"
-              title="Select visual card styling template"
-            >
-              {(Object.keys(CARD_TEMPLATES) as CardTemplateId[]).map((tId) => (
-                <option key={tId} value={tId} className="bg-popover text-popover-foreground">
-                  {CARD_TEMPLATES[tId].label}
-                </option>
-              ))}
-            </select>
+          {/* Docked Template Selector + Card Settings Action Group */}
+          <div className="flex items-center bg-background/90 border border-border/80 rounded-md shadow-2xs h-7 overflow-hidden">
+            <div className="flex items-center gap-1 px-1.5 sm:px-2 border-r border-border/60 text-xs h-full">
+              <span className="text-muted-foreground font-medium text-[11px] hidden md:inline">Template:</span>
+              <select
+                value={selectedTemplate}
+                onChange={(e) => onTemplateChange(e.target.value as CardTemplateId)}
+                className="bg-transparent font-medium text-foreground focus:outline-hidden cursor-pointer py-0.5 text-xs max-w-[100px] xs:max-w-[130px] sm:max-w-[180px] md:max-w-none"
+                title="Select visual card styling template"
+              >
+                {(Object.keys(CARD_TEMPLATES) as CardTemplateId[]).map((tId) => (
+                  <option key={tId} value={tId} className="bg-popover text-popover-foreground">
+                    {CARD_TEMPLATES[tId].label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Card Settings Button docked directly to Template */}
+            {onOpenCardSettings && (
+              <button
+                type="button"
+                onClick={onOpenCardSettings}
+                className="px-1.5 sm:px-2 h-full flex items-center gap-1 text-xs font-medium text-zinc-700 hover:text-zinc-950 hover:bg-muted/80 transition-colors cursor-pointer"
+                title="Configure card fields, topic badges, and Anki display"
+              >
+                <SlidersHorizontal className="w-3.5 h-3.5 text-zinc-500" />
+                <span className="text-[11px] hidden md:inline">Card Settings</span>
+                {extractTopicBadges && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" title="Topic badges active" />
+                )}
+              </button>
+            )}
           </div>
 
           {/* Segmented Control Pill: [List | Flip] */}
@@ -491,10 +514,17 @@ export function WorkspacePreviewPanel({
                                 </div>
 
                                 {/* Front (Question) */}
-                                <div className="space-y-1 pr-14">
-                                  <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70 block">
-                                    Front
-                                  </span>
+                                <div className="space-y-1.5 pr-14">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70 block">
+                                      Front
+                                    </span>
+                                    {card.customFields?.Topic && (
+                                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-primary/10 text-primary border border-primary/20">
+                                        {card.customFields.Topic}
+                                      </span>
+                                    )}
+                                  </div>
                                   <div className="text-sm font-semibold leading-relaxed text-foreground overflow-hidden">
                                     <KaTeXRenderer text={card.front} />
                                   </div>
@@ -511,9 +541,11 @@ export function WorkspacePreviewPanel({
                                 </div>
 
                                 {/* Custom / Additional Fields */}
-                                {card.customFields && Object.keys(card.customFields).length > 0 && (
+                                {card.customFields && Object.keys(card.customFields).filter((k) => k.toLowerCase() !== "topic").length > 0 && (
                                   <div className="pt-2.5 border-t border-border/40 dark:border-border/40 space-y-1.5">
-                                    {Object.entries(card.customFields).map(([fieldName, content]) => (
+                                    {Object.entries(card.customFields)
+                                      .filter(([fieldName]) => fieldName.toLowerCase() !== "topic")
+                                      .map(([fieldName, content]) => (
                                       <div
                                         key={fieldName}
                                         className="text-xs flex items-baseline gap-2"
@@ -608,10 +640,17 @@ export function WorkspacePreviewPanel({
                         </div>
 
                         {/* Front (Question) */}
-                        <div className="space-y-1 pr-14">
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70 block">
-                            Front
-                          </span>
+                        <div className="space-y-1.5 pr-14">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70 block">
+                              Front
+                            </span>
+                            {card.customFields?.Topic && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-primary/10 text-primary border border-primary/20">
+                                {card.customFields.Topic}
+                              </span>
+                            )}
+                          </div>
                           <div className="text-sm font-semibold leading-relaxed text-foreground overflow-hidden">
                             <KaTeXRenderer text={card.front} />
                           </div>
@@ -628,9 +667,11 @@ export function WorkspacePreviewPanel({
                         </div>
 
                         {/* Custom / Additional Fields */}
-                        {card.customFields && Object.keys(card.customFields).length > 0 && (
+                        {card.customFields && Object.keys(card.customFields).filter((k) => k.toLowerCase() !== "topic").length > 0 && (
                           <div className="pt-2.5 border-t border-border/40 dark:border-border/40 space-y-1.5">
-                            {Object.entries(card.customFields).map(([fieldName, content]) => (
+                            {Object.entries(card.customFields)
+                              .filter(([fieldName]) => fieldName.toLowerCase() !== "topic")
+                              .map(([fieldName, content]) => (
                               <div
                                 key={fieldName}
                                 className="text-xs flex items-baseline gap-2"

@@ -272,8 +272,12 @@ export function formatMarkdownForAnki(content: string): string {
   // 3. Clean up existing raw <br> tags in markdown to standard newlines
   str = str.replace(/<br\s*[\/]?[^>]*>/gi, "\n");
 
-  // Protect math formulas and code blocks so that internal newlines in LaTeX matrices
-  // or aligned equations are never corrupted with <br> or backslash removals
+  // 4. Repair escaped environment asterisks (e.g. \begin{align\*} -> \begin{align*})
+  str = str.replace(/\\begin\{([a-zA-Z]+)\\\*\}/gi, "\\begin{$1*}");
+  str = str.replace(/\\end\{([a-zA-Z]+)\\\*\}/gi, "\\end{$1*}");
+
+  // Protect math formulas and code blocks so that internal newlines in LaTeX matrices,
+  // bracketed display math, or aligned equations are never corrupted with <br> or backslash removals
   const placeholders: string[] = [];
   const protect = (match: string) => {
     const idx = placeholders.length;
@@ -281,23 +285,38 @@ export function formatMarkdownForAnki(content: string): string {
     return `XPROTECTEDCHUNK${idx}X`;
   };
 
+  // Step A: Protect existing delimited blocks and code blocks
   str = str.replace(/```[\s\S]*?```/g, protect);
   str = str.replace(/\$\$[\s\S]*?\$\$/g, protect);
-  str = str.replace(/\\begin\{([a-z*]+)\}[\s\S]*?\\end\{\1\}/gi, protect);
+  str = str.replace(/\\{1,2}\[[\s\S]*?\\{1,2}\]/g, protect);
+  str = str.replace(/\\{1,2}\([^\n]*?\\{1,2}\)/g, protect);
   str = str.replace(/\\?<anki-mathjax[^>]*>[\s\S]*?\\?<\/anki-mathjax>/gi, protect);
   str = str.replace(/\$[^$\n]+?\$/g, protect);
 
-  // 4. Clean up stray backslash lines and trailing backslashes outside math
+  // Step B: Wrap any remaining bare LaTeX display environments in display math ($$...$$).
+  // Because all existing math delimiters ($$, \[, \(, <anki-mathjax>, $) and code blocks are
+  // already replaced with placeholders, any \begin{...}...\end{\1} matched here is strictly bare.
+  const BARE_ENV_REGEX =
+    /\\begin\{(align\*?|alignat\*?|equation\*?|gather\*?|multline\*?|flalign\*?|split|pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix|matrix|cases|dcases|rcases|drcases|aligned|alignedat\*?|gathered|array|CD)\}([\s\S]*?)\\end\{\1\}/gi;
+
+  str = str.replace(BARE_ENV_REGEX, (match) => {
+    return protect(`$$\n${match.trim()}\n$$`);
+  });
+
+  // Step C: Protect any remaining generic \begin{...}...\end{...} environments so their contents are preserved
+  str = str.replace(/\\begin\{([a-zA-Z*]+)\}[\s\S]*?\\end\{\1\}/gi, protect);
+
+  // 5. Clean up stray backslash lines and trailing backslashes outside math
   str = str.replace(/(^|\n)\s*\\+\s*(?=\n|$)/g, "$1");
   str = str.replace(/([^\\])\\+[ \t]*(?=\n|$)/g, "$1");
 
-  // 5. Normalize accidental single-space indentation before list markers (leaves 2+ spaces / tabs intact)
+  // 6. Normalize accidental single-space indentation before list markers (leaves 2+ spaces / tabs intact)
   str = str.replace(/(^|\n) ([*+-]|\d+\.) /g, "$1$2 ");
 
-  // 6. Normalize multiple blank lines to clean double newlines
+  // 7. Normalize multiple blank lines to clean double newlines
   str = str.replace(/\n{3,}/g, "\n\n");
 
-  // 7. Convert newlines to Anki HTML breaks (<br>)
+  // 8. Convert newlines to Anki HTML breaks (<br>)
   str = str.replace(/\n/g, "<br>");
 
   // Restore protected chunks
@@ -776,12 +795,21 @@ export async function createApkg(cards: FlashCard[], deckName: string, templateI
 
   let cardAfmt = selectedTemplate.afmt;
   for (const name of customFieldNames) {
+    // Topic is elevated to a first-class badge on the front, not rendered as generic back footer
+    if (name.toLowerCase() === "topic") continue;
+
     const safeName = name.toLowerCase().replace(/[^a-z0-9]/g, "-");
     if (templateId === "markdown_basic") {
       cardAfmt += `\n{{#${name}}}<div class="custom-field custom-field-${safeName}"><hr><b>${name}:</b><div class="md-custom-field md-field"><pre>{{${name}}}</pre></div></div>{{/${name}}}`;
     } else {
       cardAfmt += `\n{{#${name}}}<div class="custom-field custom-field-${safeName}"><hr><b>${name}:</b><br>{{${name}}}</div>{{/${name}}}`;
     }
+  }
+
+  let cardQfmt = selectedTemplate.qfmt;
+  const topicFieldName = customFieldNames.find((n) => n.toLowerCase() === "topic");
+  if (topicFieldName) {
+    cardQfmt = `{{#${topicFieldName}}}<div class="card-topic-badge">{{${topicFieldName}}}</div>{{/${topicFieldName}}}\n` + cardQfmt;
   }
 
   const modelJson = {
@@ -802,7 +830,7 @@ export async function createApkg(cards: FlashCard[], deckName: string, templateI
     tmpls: [
       {
         name: "Card 1",
-        qfmt: selectedTemplate.qfmt,
+        qfmt: cardQfmt,
         afmt: cardAfmt,
         bafmt: "",
         bqfmt: "",
@@ -840,10 +868,12 @@ export async function createApkg(cards: FlashCard[], deckName: string, templateI
     );
     const flds = [frontHTML, backHTML, ...extraFlds].join("\x1f");
     
+    const noteTags = (card.tags || "").trim() ? ` ${(card.tags || "").trim()} ` : "";
+
     db.exec(
       "INSERT INTO notes (id, guid, mid, mod, usn, tags, flds, sfld, csum, flags, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       [
-        noteId, generateGuid(), modelId, timestamp, -1, "", flds, frontHTML, 0, 0, ""
+        noteId, generateGuid(), modelId, timestamp, -1, noteTags, flds, frontHTML, 0, 0, ""
       ]
     );
 

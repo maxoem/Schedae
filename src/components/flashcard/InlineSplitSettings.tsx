@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { RefreshCw, Sparkles, Plus, Heading, MessageSquare, MessageCircle, Braces } from "lucide-react";
+import { RefreshCw, Sparkles, Plus, Heading, MessageSquare, MessageCircle, X } from "lucide-react";
 
 import type { SplitSettings } from "./SplitSettingsDialog";
 import {
@@ -87,21 +87,21 @@ function TagChipRow({ label, icon, description, tags, onTagsChange, placeholder,
         {action}
       </div>
       <p className="text-[11px] text-muted-foreground leading-relaxed">{description}</p>
-      <div className="flex flex-wrap gap-1.5 items-center min-h-[36px] p-2 rounded-lg border border-border/60 bg-muted/20 focus-within:border-primary/50 focus-within:bg-background transition-colors">
+      <div className="flex flex-wrap gap-1.5 items-center min-h-[36px] p-1.5 rounded-lg border border-zinc-200 bg-white focus-within:border-zinc-900/40 transition-colors">
         {tags.map((t) => (
           <Badge
             key={t.id}
             variant="secondary"
-            className="gap-1 px-2.5 py-1 text-xs font-medium bg-background border border-border/70 hover:bg-muted/60 cursor-default shadow-2xs"
+            className="gap-1 px-2 py-0.5 text-xs font-medium bg-white text-zinc-800 border border-zinc-200 hover:bg-zinc-50 cursor-default shadow-2xs"
           >
             {t.text}
             <button
               type="button"
               onClick={() => removeItem(t.id)}
-              className="ml-1 hover:text-destructive transition-colors [&>svg]:size-2.5"
+              className="ml-0.5 text-zinc-400 hover:text-zinc-800 transition-colors cursor-pointer"
               aria-label={`Remove ${t.text}`}
             >
-              <Braces className="rotate-45" />
+              <X className="w-3 h-3" />
             </button>
           </Badge>
         ))}
@@ -118,7 +118,7 @@ function TagChipRow({ label, icon, description, tags, onTagsChange, placeholder,
           <button
             type="button"
             onClick={addItem}
-            className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 text-primary hover:bg-primary/20 transition-colors shrink-0 cursor-pointer"
+            className="flex items-center justify-center w-6 h-6 rounded-md bg-zinc-100 text-zinc-700 hover:bg-zinc-200 transition-colors shrink-0 cursor-pointer"
             aria-label="Add tag"
           >
             <Plus className="w-3 h-3" />
@@ -213,15 +213,15 @@ export function InlineSplitSettings({
       {/* Format Presets bar & Live match count */}
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <Label className="text-xs font-semibold text-foreground/80">Format Presets</Label>
+          <Label className="text-xs font-semibold text-zinc-900">Format Presets</Label>
           {sampleText.trim() && extractionCount > 0 && (
-            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-primary/10 text-primary text-xs font-medium font-mono">
+            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/80 text-xs font-medium font-mono">
               <Sparkles className="w-3 h-3" />
               <span>{extractionCount} card{extractionCount !== 1 ? "s" : ""} matched</span>
             </div>
           )}
           {sampleText.trim() && extractionCount === 0 && (
-            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 text-xs font-medium">
+            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200/80 text-xs font-medium">
               <Sparkles className="w-3 h-3" />
               <span>0 cards matched</span>
             </div>
@@ -234,13 +234,13 @@ export function InlineSplitSettings({
             return (
               <Button
                 key={preset.id}
-                variant={isSelected ? "default" : "outline"}
+                variant="outline"
                 size="sm"
                 className={cn(
-                  "h-8 text-xs font-medium rounded-lg",
+                  "h-7 text-xs font-medium rounded-md transition-all cursor-pointer",
                   isSelected
-                    ? "bg-primary text-primary-foreground shadow-2xs"
-                    : "bg-background hover:bg-muted text-foreground border-border/80"
+                    ? "bg-zinc-900 text-white border-zinc-900 shadow-2xs hover:bg-zinc-800 hover:text-white"
+                    : "bg-white text-zinc-700 border-zinc-200/90 hover:bg-zinc-50 hover:text-zinc-950"
                 )}
                 onClick={() => handlePreset(preset)}
               >
@@ -249,29 +249,29 @@ export function InlineSplitSettings({
             );
           })}
           {!isPreset && (
-            <Badge variant="outline" className="h-8 px-2.5 text-xs font-medium rounded-lg border-dashed">
+            <Badge variant="outline" className="h-7 px-2 text-xs font-medium rounded-md border-dashed border-zinc-300 text-zinc-600 bg-zinc-50">
               Custom Rules
             </Badge>
           )}
           <Button
             variant="ghost"
             size="sm"
-            className="h-8 text-xs text-muted-foreground hover:text-foreground px-2"
+            className="h-7 text-xs text-zinc-500 hover:text-zinc-950 px-2 cursor-pointer"
             onClick={handleReset}
             title="Reset to default delimiters"
           >
-            <RefreshCw className="w-3.5 h-3.5 mr-1" />
+            <RefreshCw className="w-3 h-3 mr-1" />
             <span>Reset</span>
           </Button>
         </div>
       </div>
 
       {/* Rules directly written out without any collapsible accordion */}
-      <div className="space-y-4 pt-3 border-t border-border/50">
+      <div className="space-y-4 pt-3 border-t border-zinc-200/60">
         {/* Card Separators */}
         <TagChipRow
           label="Card Separators"
-          icon={<Heading className="w-4 h-4" />}
+          icon={<Heading className="w-4 h-4 text-zinc-500" />}
           description="Patterns that divide blocks into individual flashcards."
           tags={cardSeparatorsTags}
           onTagsChange={(t) => setTagList("cardSeparators", t)}
@@ -283,7 +283,7 @@ export function InlineSplitSettings({
                 checked={local.includeCardSeparatorMarker}
                 onCheckedChange={(v) => update({ includeCardSeparatorMarker: !!v })}
               />
-              <Label htmlFor="inc-card-sep" className="text-xs text-muted-foreground cursor-pointer">
+              <Label htmlFor="inc-card-sep" className="text-xs text-zinc-600 cursor-pointer">
                 Include in card
               </Label>
             </div>
@@ -293,7 +293,7 @@ export function InlineSplitSettings({
         {/* Question Markers */}
         <TagChipRow
           label="Question Indicators (Front)"
-          icon={<MessageSquare className="w-4 h-4" />}
+          icon={<MessageSquare className="w-4 h-4 text-zinc-500" />}
           description="Labels that indicate a question or front side."
           tags={questionMarkersTags}
           onTagsChange={(t) => setTagList("questionMarkers", t)}
@@ -305,7 +305,7 @@ export function InlineSplitSettings({
                 checked={local.includeQuestionMarker}
                 onCheckedChange={(v) => update({ includeQuestionMarker: !!v })}
               />
-              <Label htmlFor="inc-q" className="text-xs text-muted-foreground cursor-pointer">
+              <Label htmlFor="inc-q" className="text-xs text-zinc-600 cursor-pointer">
                 Include in question
               </Label>
             </div>
@@ -315,7 +315,7 @@ export function InlineSplitSettings({
         {/* Answer Markers */}
         <TagChipRow
           label="Answer Indicators (Back)"
-          icon={<MessageCircle className="w-4 h-4" />}
+          icon={<MessageCircle className="w-4 h-4 text-zinc-500" />}
           description="Labels that indicate the answer or back side."
           tags={answerMarkersTags}
           onTagsChange={(t) => setTagList("answerMarkers", t)}
@@ -327,7 +327,7 @@ export function InlineSplitSettings({
                 checked={local.includeAnswerMarker}
                 onCheckedChange={(v) => update({ includeAnswerMarker: !!v })}
               />
-              <Label htmlFor="inc-a" className="text-xs text-muted-foreground cursor-pointer">
+              <Label htmlFor="inc-a" className="text-xs text-zinc-600 cursor-pointer">
                 Include in answer
               </Label>
             </div>
@@ -335,18 +335,19 @@ export function InlineSplitSettings({
         />
 
         {/* Bracket handling */}
-        <div className="flex items-start gap-2.5 pt-1 px-3 py-2.5 rounded-lg bg-muted/40 border border-border/40">
+        <div className="flex items-start gap-2.5 pt-2">
           <Checkbox
             id="ignore-brackets"
             checked={local.ignoreMarkerBrackets}
             onCheckedChange={(v) => update({ ignoreMarkerBrackets: !!v })}
+            className="mt-0.5"
           />
-          <div className="flex flex-col gap-1">
-            <Label htmlFor="ignore-brackets" className="text-xs font-medium text-foreground cursor-pointer leading-none">
+          <div className="flex flex-col gap-0.5">
+            <Label htmlFor="ignore-brackets" className="text-xs font-medium text-zinc-900 cursor-pointer leading-none">
               Ignore brackets in markers
             </Label>
-            <span className="text-xs text-muted-foreground leading-relaxed">
-              Allows <code className="text-[11px] bg-background px-1 py-0.5 rounded border">Frage: (Szenario)</code> to match <code className="text-[11px] bg-background px-1 py-0.5 rounded border">Frage:</code>
+            <span className="text-[11px] text-zinc-500 leading-relaxed">
+              Allows <code className="text-[10px] bg-zinc-100 px-1 py-0.5 rounded text-zinc-800 font-mono">Frage: (Szenario)</code> to match <code className="text-[10px] bg-zinc-100 px-1 py-0.5 rounded text-zinc-800 font-mono">Frage:</code>
             </span>
           </div>
         </div>

@@ -79,6 +79,14 @@ function FlashcardItem({ card, preRenderedFrontHtml, preRenderedBackHtml }: Flas
                 marker:prose-li:text-zinc-600
                 [&_.katex-display]:my-6
               ">
+                {!isFlipped && card.customFields?.Topic && (
+                  <div className="mb-3">
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-primary/10 text-primary border border-primary/20 tracking-wide uppercase">
+                      {card.customFields.Topic}
+                    </span>
+                  </div>
+                )}
+
                 {isFlipped ? (
                   preRenderedBackHtml ? (
                     <div dangerouslySetInnerHTML={{ __html: preRenderedBackHtml }} />
@@ -95,7 +103,9 @@ function FlashcardItem({ card, preRenderedFrontHtml, preRenderedBackHtml }: Flas
 
                 {isFlipped && card.customFields && Object.keys(card.customFields).length > 0 && (
                   <div className="w-full mt-6 pt-4 border-t border-zinc-200 dark:border-zinc-700/60 space-y-3">
-                    {Object.entries(card.customFields).map(([fieldName, content]) => (
+                    {Object.entries(card.customFields)
+                      .filter(([fieldName]) => fieldName.toLowerCase() !== "topic")
+                      .map(([fieldName, content]) => (
                       <div
                         key={fieldName}
                         className="p-3 rounded-lg bg-zinc-100/80 dark:bg-zinc-800/40 border border-zinc-200/80 dark:border-zinc-700/40 space-y-1 text-left"
