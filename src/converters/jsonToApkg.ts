@@ -795,12 +795,21 @@ export async function createApkg(cards: FlashCard[], deckName: string, templateI
 
   let cardAfmt = selectedTemplate.afmt;
   for (const name of customFieldNames) {
+    // Topic is elevated to a first-class badge on the front, not rendered as generic back footer
+    if (name.toLowerCase() === "topic") continue;
+
     const safeName = name.toLowerCase().replace(/[^a-z0-9]/g, "-");
     if (templateId === "markdown_basic") {
       cardAfmt += `\n{{#${name}}}<div class="custom-field custom-field-${safeName}"><hr><b>${name}:</b><div class="md-custom-field md-field"><pre>{{${name}}}</pre></div></div>{{/${name}}}`;
     } else {
       cardAfmt += `\n{{#${name}}}<div class="custom-field custom-field-${safeName}"><hr><b>${name}:</b><br>{{${name}}}</div>{{/${name}}}`;
     }
+  }
+
+  let cardQfmt = selectedTemplate.qfmt;
+  const topicFieldName = customFieldNames.find((n) => n.toLowerCase() === "topic");
+  if (topicFieldName) {
+    cardQfmt = `{{#${topicFieldName}}}<div class="card-topic-badge">{{${topicFieldName}}}</div>{{/${topicFieldName}}}\n` + cardQfmt;
   }
 
   const modelJson = {
@@ -821,7 +830,7 @@ export async function createApkg(cards: FlashCard[], deckName: string, templateI
     tmpls: [
       {
         name: "Card 1",
-        qfmt: selectedTemplate.qfmt,
+        qfmt: cardQfmt,
         afmt: cardAfmt,
         bafmt: "",
         bqfmt: "",
@@ -859,10 +868,12 @@ export async function createApkg(cards: FlashCard[], deckName: string, templateI
     );
     const flds = [frontHTML, backHTML, ...extraFlds].join("\x1f");
     
+    const noteTags = (card.tags || "").trim() ? ` ${(card.tags || "").trim()} ` : "";
+
     db.exec(
       "INSERT INTO notes (id, guid, mid, mod, usn, tags, flds, sfld, csum, flags, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       [
-        noteId, generateGuid(), modelId, timestamp, -1, "", flds, frontHTML, 0, 0, ""
+        noteId, generateGuid(), modelId, timestamp, -1, noteTags, flds, frontHTML, 0, 0, ""
       ]
     );
 

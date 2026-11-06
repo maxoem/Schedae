@@ -82,6 +82,24 @@ export function useDeckWorkspace(aiStencil?: Stencil | null) {
 
   const [parserMode, setParserMode] = useState<"regex" | "heuristic">("regex");
   const [validateJson, setValidateJson] = useState(true);
+  const [extractTopicBadges, setExtractTopicBadgesState] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem("schedae_extract_topic_badges");
+      return saved !== null ? JSON.parse(saved) : true;
+    } catch {
+      return true;
+    }
+  });
+
+  const setExtractTopicBadges = useCallback((enabled: boolean) => {
+    setExtractTopicBadgesState(enabled);
+    try {
+      localStorage.setItem("schedae_extract_topic_badges", JSON.stringify(enabled));
+    } catch {
+      // ignore
+    }
+  }, []);
+
   const [deckCss, setDeckCss] = useState<string>("");
 
   const [splitSettings, setSplitSettingsState] = useState<SplitSettings>(() => {
@@ -114,6 +132,7 @@ export function useDeckWorkspace(aiStencil?: Stencil | null) {
       aiStencil,
       normalizeModel: selectedModel,
       parserMode,
+      extractTopicBadges,
     })
   );
 
@@ -132,6 +151,7 @@ export function useDeckWorkspace(aiStencil?: Stencil | null) {
         aiStencil,
         normalizeModel: selectedModel,
         parserMode,
+        extractTopicBadges,
       });
 
       setDraftParseResult(res);
@@ -148,7 +168,7 @@ export function useDeckWorkspace(aiStencil?: Stencil | null) {
     return () => {
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
     };
-  }, [sourceText, validateJson, splitSettings, aiStencil, selectedModel, parserMode, deckName]);
+  }, [sourceText, validateJson, splitSettings, aiStencil, selectedModel, parserMode, deckName, extractTopicBadges]);
 
   // Sync state to localStorage
   useEffect(() => {
@@ -354,6 +374,8 @@ export function useDeckWorkspace(aiStencil?: Stencil | null) {
     setParserMode,
     validateJson,
     setValidateJson,
+    extractTopicBadges,
+    setExtractTopicBadges,
     splitSettings,
     setSplitSettings,
     previewViewMode,

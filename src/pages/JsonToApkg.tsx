@@ -197,6 +197,8 @@ export default function JsonToApkg() {
           onModelChange={workspace.setSelectedModel}
           validateJson={workspace.validateJson}
           onValidateJsonChange={workspace.setValidateJson}
+          extractTopicBadges={workspace.extractTopicBadges}
+          onExtractTopicBadgesChange={workspace.setExtractTopicBadges}
           splitSettings={workspace.splitSettings}
           onSplitSettingsChange={workspace.setSplitSettings}
           sampleText={workspace.sourceText}

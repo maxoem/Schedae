@@ -25,6 +25,8 @@ interface WorkspaceParserSheetProps {
   onModelChange: (model: AiModelPresetId) => void;
   validateJson: boolean;
   onValidateJsonChange: (val: boolean) => void;
+  extractTopicBadges?: boolean;
+  onExtractTopicBadgesChange?: (val: boolean) => void;
   splitSettings: SplitSettings;
   onSplitSettingsChange: (settings: SplitSettings) => void;
   sampleText: string;
@@ -45,6 +47,8 @@ export function WorkspaceParserSheet({
   onModelChange,
   validateJson,
   onValidateJsonChange,
+  extractTopicBadges = true,
+  onExtractTopicBadgesChange,
   splitSettings,
   onSplitSettingsChange,
   sampleText,
@@ -111,6 +115,18 @@ export function WorkspaceParserSheet({
                 </div>
                 <Toggle checked={validateJson} onChange={onValidateJsonChange} />
               </div>
+
+              {onExtractTopicBadgesChange && (
+                <div className="flex items-center justify-between pt-2 border-t border-border/40">
+                  <div className="flex flex-col pr-2">
+                    <span className="text-xs font-medium">Extract Topic Badges</span>
+                    <span className="text-[10px] text-muted-foreground">
+                      Format leading $$Topic | Subtopic$$ or [Topic] into styled card badges and Anki tags
+                    </span>
+                  </div>
+                  <Toggle checked={extractTopicBadges} onChange={onExtractTopicBadgesChange} />
+                </div>
+              )}
             </div>
           </div>
 

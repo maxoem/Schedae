@@ -491,10 +491,17 @@ export function WorkspacePreviewPanel({
                                 </div>
 
                                 {/* Front (Question) */}
-                                <div className="space-y-1 pr-14">
-                                  <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70 block">
-                                    Front
-                                  </span>
+                                <div className="space-y-1.5 pr-14">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70 block">
+                                      Front
+                                    </span>
+                                    {card.customFields?.Topic && (
+                                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-primary/10 text-primary border border-primary/20">
+                                        {card.customFields.Topic}
+                                      </span>
+                                    )}
+                                  </div>
                                   <div className="text-sm font-semibold leading-relaxed text-foreground overflow-hidden">
                                     <KaTeXRenderer text={card.front} />
                                   </div>
@@ -511,9 +518,11 @@ export function WorkspacePreviewPanel({
                                 </div>
 
                                 {/* Custom / Additional Fields */}
-                                {card.customFields && Object.keys(card.customFields).length > 0 && (
+                                {card.customFields && Object.keys(card.customFields).filter((k) => k.toLowerCase() !== "topic").length > 0 && (
                                   <div className="pt-2.5 border-t border-border/40 dark:border-border/40 space-y-1.5">
-                                    {Object.entries(card.customFields).map(([fieldName, content]) => (
+                                    {Object.entries(card.customFields)
+                                      .filter(([fieldName]) => fieldName.toLowerCase() !== "topic")
+                                      .map(([fieldName, content]) => (
                                       <div
                                         key={fieldName}
                                         className="text-xs flex items-baseline gap-2"
@@ -608,10 +617,17 @@ export function WorkspacePreviewPanel({
                         </div>
 
                         {/* Front (Question) */}
-                        <div className="space-y-1 pr-14">
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70 block">
-                            Front
-                          </span>
+                        <div className="space-y-1.5 pr-14">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70 block">
+                              Front
+                            </span>
+                            {card.customFields?.Topic && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-primary/10 text-primary border border-primary/20">
+                                {card.customFields.Topic}
+                              </span>
+                            )}
+                          </div>
                           <div className="text-sm font-semibold leading-relaxed text-foreground overflow-hidden">
                             <KaTeXRenderer text={card.front} />
                           </div>
@@ -628,9 +644,11 @@ export function WorkspacePreviewPanel({
                         </div>
 
                         {/* Custom / Additional Fields */}
-                        {card.customFields && Object.keys(card.customFields).length > 0 && (
+                        {card.customFields && Object.keys(card.customFields).filter((k) => k.toLowerCase() !== "topic").length > 0 && (
                           <div className="pt-2.5 border-t border-border/40 dark:border-border/40 space-y-1.5">
-                            {Object.entries(card.customFields).map(([fieldName, content]) => (
+                            {Object.entries(card.customFields)
+                              .filter(([fieldName]) => fieldName.toLowerCase() !== "topic")
+                              .map(([fieldName, content]) => (
                               <div
                                 key={fieldName}
                                 className="text-xs flex items-baseline gap-2"

@@ -6,6 +6,7 @@ import { RegexExtractor } from "./extractors/regexExtractor";
 import { AutoDetectExtractor } from "./extractors/autoDetectExtractor";
 import { FormatDetector, type FormatHeuristicResult } from "./heuristics/formatDetector";
 import type { DeckParseResult, DetectedFormat, ExtractorOptions, ExtractorStrategy } from "./types";
+import { defaultDeckTransformerService, DEFAULT_TRANSFORMATION_CONFIG } from "@/services/deckTransformer";
 
 export class DeckParserService {
   private static extractors = new Map<string, ExtractorStrategy>();
@@ -136,9 +137,18 @@ export class DeckParserService {
         extractorResult.cards
       );
 
+      let cards = extractorResult.cards;
+      if (options.extractTopicBadges) {
+        const transformConfig = options.transformConfig ?? {
+          ...DEFAULT_TRANSFORMATION_CONFIG,
+          extractTopicBadges: true,
+        };
+        cards = defaultDeckTransformerService.transformCards(cards, transformConfig);
+      }
+
       return {
         success: true,
-        cards: extractorResult.cards,
+        cards,
         deckTitle: extractorResult.deckTitle,
         deckStyle: extractorResult.deckStyle,
         detectedFormat,
@@ -163,9 +173,18 @@ export class DeckParserService {
             regexRes.usedSettings?.id
           );
 
+          let cards = regexRes.cards;
+          if (options.extractTopicBadges) {
+            const transformConfig = options.transformConfig ?? {
+              ...DEFAULT_TRANSFORMATION_CONFIG,
+              extractTopicBadges: true,
+            };
+            cards = defaultDeckTransformerService.transformCards(cards, transformConfig);
+          }
+
           return {
             success: true,
-            cards: regexRes.cards,
+            cards,
             detectedFormat,
             detectedFormatLabel,
             confidence,
