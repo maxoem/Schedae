@@ -59,7 +59,7 @@ export class FormatDetector {
    * Analyzes the first card or chunk of a paste and classifies its format signature.
    */
   public static detect(rawText: string): FormatHeuristicResult {
-    const text = (rawText || "").trim();
+    const text = (rawText || "").normalize("NFC").trim();
     if (!text) {
       return {
         patternId: "unknown",
@@ -71,7 +71,7 @@ export class FormatDetector {
       };
     }
 
-    const sample = sampleFirstChunk(text);
+    const sample = sampleFirstChunk(text).normalize("NFC");
 
     // 1. JSON Detection
     if (
@@ -115,14 +115,13 @@ export class FormatDetector {
     }
 
     // 2. Hierarchical Markdown Headings (# Card 1 / ## Front / ## Back / ## Notes)
-    const headingFrontMatch = sample.match(/^#{1,4}\s+([^\n]+)/im);
-    const hasHeadingFront = /^#{1,4}\s+(?:Front|Question|Frage|Vorderseite|Prompt)\b/im.test(sample);
-    const hasHeadingBack = /^#{1,4}\s+(?:Back|Answer|Antwort|Rückseite|Solution|Lösung)\b/im.test(sample);
+    const hasHeadingFront = /^#{1,4}\s+[*_~]*(?:Front|Question|Frage|Vorderseite|Prompt)\b/im.test(sample);
+    const hasHeadingBack = /^#{1,4}\s+[*_~]*(?:Back|Answer|Antwort|Rückseite|Solution|Lösung)\b/im.test(sample);
 
     if (hasHeadingFront && hasHeadingBack) {
       // Find all heading titles in the sample
       const allHeadings = Array.from(sample.matchAll(/^#{1,4}\s+([^\n]+)/gim)).map((m) =>
-        m[1].replace(/[:*#_]/g, "").trim()
+        m[1].normalize("NFC").replace(/[:*#_]/g, "").trim()
       );
 
       const customFields = allHeadings.filter(
@@ -130,7 +129,7 @@ export class FormatDetector {
       );
 
       const hasTopCardHeader = /^#\s+(?:Card|Karte|\d+\b)/im.test(sample);
-      const isDepth3Headings = /^###\s+(?:Question|Frage|Front)/im.test(sample);
+      const isDepth3Headings = /^###\s+[*_~]*(?:Question|Frage|Front)\b/im.test(sample);
 
       if (customFields.length > 0 || hasTopCardHeader) {
         return {

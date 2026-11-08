@@ -127,10 +127,10 @@ const HR_SEPARATOR_REGEX = /^[-*_]{3,}$/;
 const HEADING_CARD_REGEX = /^#{1,6}\s*(?:Karte|Card)(?:\s+\d+|\b.*)$/i;
 const BOLD_CARD_REGEX = /^[-*•]?\s*(?:\*\*|__)(?:Karte|Card)(?:\s+\d+|\b.*)(?:\*\*|__)\s*:?.*$/i;
 
-const HEADING_QUESTION_REGEX = /^#{1,6}\s*(?:Karte|Card)?\s*(?:Frage|Question|Front|Vorderseite|Prompt)(?:\s*:|\b.*)/i;
+const HEADING_QUESTION_REGEX = /^#{1,6}\s*(?:Karte|Card)?\s*[*_~]*(?:Frage|Question|Front|Vorderseite|Prompt)\b(?:\s*:|\b.*)/i;
 const QUESTION_MARKER_PREFIX_REGEX = /^\s*[-*•]?\s*(?:#{1,6}\s*)?(?:\*\*|__)?(?:Frage|Question|Q|Front|Vorderseite|Prompt)(?:\*\*|__)?\s*:(?:\*\*|__)?\s*/i;
 
-const HEADING_ANSWER_REGEX = /^#{1,6}\s*(?:Antwort|Answer|Back|Rückseite|Solution|Lösung)(?:\s*:|\b.*)/i;
+const HEADING_ANSWER_REGEX = /^#{1,6}\s*[*_~]*(?:Antwort|Answer|Back|Rückseite|Solution|Lösung)\b(?:\s*:|\b.*)/i;
 const ANSWER_MARKER_PREFIX_REGEX = /^\s*[-*•]?\s*(?:#{1,6}\s*)?(?:\*\*|__)?(?:Antwort|Answer|A|Back|Rückseite|Solution|Lösung)(?:\*\*|__)?\s*:(?:\*\*|__)?\s*/i;
 
 const HEADING_CUSTOM_REGEX = /^#{1,6}\s+([^\n#]+)$/i;
@@ -140,8 +140,10 @@ const NON_FIELD_HEADINGS = /^(?:Karte|Card|Frage|Question|Front|Vorderseite|Antw
 
 function cleanTitle(raw: string): string {
   return raw
-    .replace(/^[*_~`#]+|[*_~`#]+$/g, "")
-    .replace(/:$/, "")
+    .normalize("NFC")
+    .replace(/^[*_~`#\s]+|[*_~`#\s]+$/g, "")
+    .replace(/^:+|:+$/g, "")
+    .replace(/^[*_~`#\s]+|[*_~`#\s]+$/g, "")
     .trim();
 }
 

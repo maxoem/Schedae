@@ -15,8 +15,10 @@ const BACK_ALIASES = /^(?:back|answer|antwort|rückseite|solution|lösung)$/i;
 
 function cleanHeadingTitle(raw: string): string {
   return raw
-    .replace(/^[*_~`#]+|[*_~`#]+$/g, "")
-    .replace(/:$/, "")
+    .normalize("NFC")
+    .replace(/^[*_~`#\s]+|[*_~`#\s]+$/g, "")
+    .replace(/^:+|:+$/g, "")
+    .replace(/^[*_~`#\s]+|[*_~`#\s]+$/g, "")
     .trim();
 }
 
@@ -37,12 +39,13 @@ export class MarkdownSectionsExtractor implements ExtractorStrategy {
 
   canExtract(text: string): boolean {
     if (!text || text.trim().length === 0) return false;
-    const hasFront = /^#{1,4}\s+(?:Front|Question|Frage|Vorderseite|Prompt)\b/im.test(text);
-    const hasBack = /^#{1,4}\s+(?:Back|Answer|Antwort|Rückseite|Solution|Lösung)\b/im.test(text);
+    const norm = text.normalize("NFC");
+    const hasFront = /^#{1,4}\s+[*_~]*(?:Front|Question|Frage|Vorderseite|Prompt)\b/im.test(norm);
+    const hasBack = /^#{1,4}\s+[*_~]*(?:Back|Answer|Antwort|Rückseite|Solution|Lösung)\b/im.test(norm);
     return hasFront && hasBack;
   }
 
-  extract(text: string, options: ExtractorOptions): ExtractorResult {
+  extract(text: string, _options: ExtractorOptions): ExtractorResult {
     const diagnostics: DiagnosticIssue[] = [];
     const cleanText = text.trim();
 
@@ -200,10 +203,7 @@ export class MarkdownSectionsExtractor implements ExtractorStrategy {
           back = back ? `${back}\n\n${section.content}` : section.content;
         } else {
           // Custom field: preserve original title format (e.g. "Notes", "Sources", "Code Example")
-          const fieldName = section.title
-            .replace(/^#+\s*/, "")
-            .replace(/[:*]+$/, "")
-            .trim();
+          const fieldName = cleanHeadingTitle(section.title);
           if (fieldName) {
             if (customFields[fieldName]) {
               customFields[fieldName] += `\n\n${section.content}`;

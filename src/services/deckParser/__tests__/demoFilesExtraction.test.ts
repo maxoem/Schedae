@@ -18,6 +18,7 @@ function loadDemoFile(filename: string): string {
 
 describe("Demo Markdown Files Extraction Verification", () => {
   const headerContent = loadDemoFile("header-format.md");
+  const header2Content = loadDemoFile("header-format2.md");
   const bulletContent = loadDemoFile("bulletpoint-format.md");
 
   describe("header-format.md (# Karte / ## Frage / ## Antwort)", () => {
@@ -57,6 +58,48 @@ describe("Demo Markdown Files Extraction Verification", () => {
       assert.equal(result.success, true);
       assert.equal(result.cards.length, 14);
       assert.equal(result.usedStrategyId, "markdown-sections");
+    });
+  });
+
+  describe("header-format2.md (# Karte / ## Vorderseite / ## **Rückseite:**)", () => {
+    test("MarkdownSectionsExtractor canExtract identifies the format", () => {
+      const extractor = new MarkdownSectionsExtractor();
+      assert.equal(extractor.canExtract(header2Content), true);
+    });
+
+    test("MarkdownSectionsExtractor extracts all 2 cards accurately", () => {
+      const extractor = new MarkdownSectionsExtractor();
+      const result = extractor.extract(header2Content, {});
+
+      assert.equal(result.cards.length, 2, "Expected exactly 2 flashcards from header-format2.md");
+
+      // Verify Card 1 (Topologischer Raum / Topologie)
+      const card1 = result.cards[0];
+      assert.ok(card1.front.includes("Topologie"), "Card 1 front should mention Topologie");
+      assert.ok(card1.front.includes("topologischen Raum"));
+      assert.ok(card1.back.includes("Potenzmenge"));
+      assert.ok(card1.back.includes("Leere Menge und Gesamtmenge"));
+      assert.ok(card1.back.includes("Abgeschlossenheit unter endlichen Schnitten"));
+
+      // Verify Card 2 (Metrischer Raum)
+      const card2 = result.cards[1];
+      assert.ok(card2.front.includes("metrischer Raum"), "Card 2 front should ask about metrischer Raum");
+      assert.ok(card2.back.includes("Distanzfunktion (Metrik)"));
+      assert.ok(card2.back.includes("Mathematischer Hinweis zur"));
+    });
+
+    test("FormatDetector classifies header-format2.md with high confidence", () => {
+      const detection = FormatDetector.detect(header2Content);
+      assert.equal(detection.patternId, "markdown-sections");
+      assert.ok(detection.confidence >= 0.95);
+    });
+
+    test("DeckParserService (Auto-Detect Default) parses header-format2.md end-to-end", () => {
+      const result = DeckParserService.parse(header2Content);
+      assert.equal(result.success, true);
+      assert.equal(result.cards.length, 2);
+      assert.equal(result.usedStrategyId, "markdown-sections");
+      assert.equal(result.detectedFormat, "markdown-headings");
     });
   });
 
