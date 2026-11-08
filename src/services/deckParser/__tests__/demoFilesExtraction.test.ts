@@ -20,6 +20,7 @@ describe("Demo Markdown Files Extraction Verification", () => {
   const headerContent = loadDemoFile("header-format.md");
   const header2Content = loadDemoFile("header-format2.md");
   const bulletContent = loadDemoFile("bulletpoint-format.md");
+  const bullet2Content = loadDemoFile("bulletpoint-format2.md");
 
   describe("header-format.md (# Karte / ## Frage / ## Antwort)", () => {
     test("MarkdownSectionsExtractor canExtract identifies the format", () => {
@@ -146,6 +147,37 @@ describe("Demo Markdown Files Extraction Verification", () => {
       assert.equal(result.usedStrategyId, "key-value");
       assert.equal(result.detectedFormat, "markdown-sections");
       assert.ok(result.cards.every((c) => c.customFields && Boolean(c.customFields["Quelle(n)"])));
+    });
+  });
+
+  describe("bulletpoint-format2.md (### Karte / **Vorderseite:** / **Rückseite:**)", () => {
+    test("FormatDetector classifies bulletpoint-format2.md as bold-italic", () => {
+      const detection = FormatDetector.detect(bullet2Content);
+      assert.equal(detection.patternId, "bold-italic");
+      assert.ok(detection.confidence >= 0.9);
+    });
+
+    test("DeckParserService (Auto-Detect Default) parses bulletpoint-format2.md end-to-end", () => {
+      const result = DeckParserService.parse(bullet2Content);
+      assert.equal(result.success, true);
+      assert.equal(result.cards.length, 2);
+      assert.equal(result.usedStrategyId, "regex");
+      assert.equal(result.detectedFormat, "custom-delimiters");
+
+      // Verify Card 1
+      const card1 = result.cards[0];
+      assert.ok(card1.front.includes("Topologie"), "Card 1 front should mention Topologie");
+      assert.ok(card1.front.includes("topologischen Raum"));
+      assert.ok(card1.back.includes("Potenzmenge"));
+      assert.ok(card1.back.includes("Leere Menge und Gesamtmenge"));
+      assert.ok(!card1.back.includes("**Rückseite:**") && !card1.back.includes("**Rückseite:**"), "Back should not contain marker");
+
+      // Verify Card 2
+      const card2 = result.cards[1];
+      assert.ok(card2.front.includes("metrischer Raum"), "Card 2 front should ask about metrischer Raum");
+      assert.ok(card2.back.includes("Distanzfunktion (Metrik)"));
+      assert.ok(card2.back.includes("Mathematischer Hinweis zur"));
+      assert.ok(!card2.back.includes("**Rückseite:**") && !card2.back.includes("**Rückseite:**"), "Back should not contain marker");
     });
   });
 

@@ -84,24 +84,28 @@ export function buildSplitRegexes(settings: SplitSettings) {
   const getParts = (str: string) => str.split(",").map((s) => s.trim()).filter(Boolean);
 
   const bParts = getParts(settings.cardSeparators);
-  const blockPatterns = bParts.map((part) => {
+  const blockPatterns = bParts.flatMap((part) => {
     const marker = normalizeSeparatorMarker(part.replace(/:$/, ""));
 
     if (!marker || /^[*_-]+$/.test(marker)) {
       const escapedExact = escapeRegExp(part);
-      return `^\\s*(?:[*+-]\\s+)?(?:#+\\s+)?(?:\\*\\*|__)?${escapedExact}(?:\\*\\*|__)?\\s*$`;
+      return [`^\\s*(?:[*+-]\\s+)?(?:#+\\s+)?(?:\\*\\*|__)?${escapedExact}(?:\\*\\*|__)?\\s*$`];
     }
 
-    const escapedMarker = escapeRegExp(marker);
-    return `^\\s*(?:[*+-]\\s+)?(?:#+\\s+)?(?:\\*\\*|__)?${escapedMarker}(?:\\b|$)(?:[^\\n]*)?(?:\\*\\*|__)?\\s*$`;
+    const variants = Array.from(new Set([marker, marker.normalize("NFC"), marker.normalize("NFD")]));
+    return variants.map((v) => {
+      const escapedMarker = escapeRegExp(v);
+      return `^\\s*(?:[*+-]\\s+)?(?:#+\\s+)?(?:\\*\\*|__)?${escapedMarker}(?:\\b|$)(?:[^\\n]*)?(?:\\*\\*|__)?\\s*$`;
+    });
   });
   const blockRegex = blockPatterns.length > 0 ? new RegExp(blockPatterns.join("|"), "m") : /(?!x)x/;
 
   const bracketOpt = settings.ignoreMarkerBrackets ? `\\s*(?:\\([^)]*\\)|\\[[^\\]]*\\])?` : ``;
 
-  const qParts = getParts(settings.questionMarkers).map((s) => {
+  const qParts = getParts(settings.questionMarkers).flatMap((s) => {
     const base = s.replace(/:$/, "");
-    return escapeRegExp(base) + (base.match(/[a-zA-Z]$/) ? "\\b" : "");
+    const variants = Array.from(new Set([base, base.normalize("NFC"), base.normalize("NFD")]));
+    return variants.map((v) => escapeRegExp(v) + (v.match(/[a-zA-Z\u00C0-\u017F]$/) ? "\\b" : ""));
   });
   const questionRegexStr =
     qParts.length > 0
@@ -109,9 +113,10 @@ export function buildSplitRegexes(settings: SplitSettings) {
       : `(?!x)x`;
   const questionRegex = new RegExp(questionRegexStr, "im");
 
-  const aParts = getParts(settings.answerMarkers).map((s) => {
+  const aParts = getParts(settings.answerMarkers).flatMap((s) => {
     const base = s.replace(/:$/, "");
-    return escapeRegExp(base) + (base.match(/[a-zA-Z]$/) ? "\\b" : "");
+    const variants = Array.from(new Set([base, base.normalize("NFC"), base.normalize("NFD")]));
+    return variants.map((v) => escapeRegExp(v) + (v.match(/[a-zA-Z\u00C0-\u017F]$/) ? "\\b" : ""));
   });
   const answerRegexStr =
     aParts.length > 0
@@ -342,7 +347,8 @@ export function extractFlashcardsFromText(text: string, settings: SplitSettings)
     }
 
     if (!settings.includeCardSeparatorMarker && bParts.length > 0) {
-      const escapedBParts = bParts.map((s) => escapeRegExp(s));
+      const variants = bParts.flatMap((s) => Array.from(new Set([s, s.normalize("NFC"), s.normalize("NFD")])));
+      const escapedBParts = variants.map((s) => escapeRegExp(s));
       const bPartsStr = escapedBParts.join("|");
       const cleanRegex = new RegExp(
         `^\\s*(?:[*+-]\\s+)?(?:#+\\s+)?(?:\\*\\*|__)?(?:${bPartsStr})\\s*(?:\\*\\*|__)?\\s*:?\\s*(?:\\*\\*|__)?\\s*`,
