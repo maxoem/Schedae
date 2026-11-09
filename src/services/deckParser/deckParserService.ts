@@ -5,6 +5,7 @@ import { StencilExtractor } from "./extractors/stencilExtractor";
 import { RegexExtractor } from "./extractors/regexExtractor";
 import { AutoDetectExtractor } from "./extractors/autoDetectExtractor";
 import { FormatDetector, type FormatHeuristicResult } from "./heuristics/formatDetector";
+import { FRONT_KEYWORDS_PATTERN, CARD_KEYWORDS_PATTERN } from "./keywords";
 import type { DeckParseResult, DetectedFormat, ExtractorOptions, ExtractorStrategy } from "./types";
 import { defaultDeckTransformerService, DEFAULT_TRANSFORMATION_CONFIG } from "@/services/deckTransformer";
 
@@ -265,9 +266,9 @@ export class DeckParserService {
     }
 
     // Strategy regex or fallback
-    const isHeadings = splitSettingsId === "headings" || /###\s+(?:Question|Frage)/i.test(text);
-    const isBold = splitSettingsId === "bold-italic" || /\*\*(?:Question|Frage|Karte|Card)\*\*/i.test(text);
-    const isQA = /^(?:Q:|Frage:)/im.test(text);
+    const isHeadings = splitSettingsId === "headings" || new RegExp(`###\\s+(?:${FRONT_KEYWORDS_PATTERN})`, "i").test(text);
+    const isBold = splitSettingsId === "bold-italic" || new RegExp(`\\*\\*(?:${FRONT_KEYWORDS_PATTERN}|${CARD_KEYWORDS_PATTERN})\\*\\*`, "i").test(text);
+    const isQA = new RegExp(`^(?:Q:|${FRONT_KEYWORDS_PATTERN}:)`, "im").test(text);
 
     return {
       detectedFormat: isHeadings

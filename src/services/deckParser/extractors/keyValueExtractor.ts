@@ -6,11 +6,16 @@ import type {
   ExtractorStrategy,
   DiagnosticIssue,
 } from "../types";
-
-const FRONT_ALIASES = /^(?:front|question|frage|vorderseite|prompt)$/i;
-const BACK_ALIASES = /^(?:back|answer|antwort|rückseite|solution|lösung)$/i;
-const CARD_HEADER_REGEX = /^(?:card|karte)\s*[\d.:]/i;
-const KNOWN_METADATA_FIELDS = /^(?:quelle(?:\(n\))?|source|sources|tags|category|kategorie|notes|notizen|extra|hinweis)\b/i;
+import {
+  isFrontKeyword,
+  isBackKeyword,
+  isMetadataKeyword,
+  isCardHeader,
+  BULLET_FRONT_REGEX,
+  BULLET_BACK_REGEX,
+  PLAIN_FRONT_REGEX,
+  PLAIN_BACK_REGEX,
+} from "../keywords";
 
 export class KeyValueExtractor implements ExtractorStrategy {
   readonly id = "key-value";
@@ -19,11 +24,9 @@ export class KeyValueExtractor implements ExtractorStrategy {
   canExtract(text: string): boolean {
     if (!text || text.trim().length === 0) return false;
     const norm = text.normalize("NFC");
-    const hasBulletFront = /(?:^|\n)[ \t]*[-*+][ \t]+(?:\*\*|__)?(?:Front|Question|Frage|Vorderseite|Prompt)(?:\*\*|__)?(?:\s*\([^)]*\))?[ \t]*:/im.test(norm);
-    const hasBulletBack = /(?:^|\n)[ \t]*[-*+][ \t]+(?:\*\*|__)?(?:Back|Answer|Antwort|Rückseite|Solution|Lösung)(?:\*\*|__)?(?:\s*\([^)]*\))?[ \t]*:/im.test(norm);
-    const hasPlainFront = /(?:^|\n)[ \t]*(?:Front|Question|Frage|Vorderseite|Prompt)(?:\s*\([^)]*\))?[ \t]*:/im.test(norm);
-    const hasPlainBack = /(?:^|\n)[ \t]*(?:Back|Answer|Antwort|Rückseite|Solution|Lösung)(?:\s*\([^)]*\))?[ \t]*:/im.test(norm);
-    return (hasBulletFront && hasBulletBack) || (hasPlainFront && hasPlainBack);
+    const hasBullet = BULLET_FRONT_REGEX.test(norm) && BULLET_BACK_REGEX.test(norm);
+    const hasPlain = PLAIN_FRONT_REGEX.test(norm) && PLAIN_BACK_REGEX.test(norm);
+    return hasBullet || hasPlain;
   }
 
   extract(text: string, options: ExtractorOptions): ExtractorResult {
@@ -119,7 +122,7 @@ export class KeyValueExtractor implements ExtractorStrategy {
       // Heading-style card delimiters (e.g. "### **Karte 1.1: ...**" or "# Card 2")
       if (/^#{1,6}\s+/.test(trimmed)) {
         const headingText = trimmed.replace(/^#+\s+/, "").replace(/^[*_~`]+|[*_~`]+$/g, "").trim();
-        if (CARD_HEADER_REGEX.test(headingText)) {
+        if (isCardHeader(headingText)) {
           finalizeCard();
           currentCard.title = headingText;
           continue;
@@ -148,16 +151,16 @@ export class KeyValueExtractor implements ExtractorStrategy {
         value = value.replace(/^\*\*\s*/, "").trim();
 
         // Check if rawKey is a card boundary header, e.g. "Karte 1.1: ..."
-        if (CARD_HEADER_REGEX.test(rawKey)) {
+        if (isCardHeader(rawKey)) {
           finalizeCard();
           currentCard.title = rawKey;
           continue;
         }
 
         const normKey = rawKey.replace(/\s*\([^)]*\)$/, "").trim();
-        const isFront = FRONT_ALIASES.test(normKey);
-        const isBack = BACK_ALIASES.test(normKey);
-        const isKnownMetadata = KNOWN_METADATA_FIELDS.test(normKey) || KNOWN_METADATA_FIELDS.test(rawKey);
+        const isFront = isFrontKeyword(normKey);
+        const isBack = isBackKeyword(normKey);
+        const isKnownMetadata = isMetadataKeyword(normKey) || isMetadataKeyword(rawKey);
 
         if (isFront || isBack || isKnownMetadata || !currentCard.lastFieldKey) {
           // If this is another Front field and we already have a Front field populated,

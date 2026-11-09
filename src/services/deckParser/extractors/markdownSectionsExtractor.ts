@@ -9,9 +9,12 @@ import type {
   ExtractorStrategy,
   DiagnosticIssue,
 } from "../types";
-
-const FRONT_ALIASES = /^(?:front|question|frage|vorderseite|prompt)$/i;
-const BACK_ALIASES = /^(?:back|answer|antwort|rückseite|solution|lösung)$/i;
+import {
+  isFrontKeyword,
+  isBackKeyword,
+  HEADING_FRONT_REGEX,
+  HEADING_BACK_REGEX,
+} from "../keywords";
 
 function cleanHeadingTitle(raw: string): string {
   return raw
@@ -40,9 +43,7 @@ export class MarkdownSectionsExtractor implements ExtractorStrategy {
   canExtract(text: string): boolean {
     if (!text || text.trim().length === 0) return false;
     const norm = text.normalize("NFC");
-    const hasFront = /^#{1,4}\s+[*_~]*(?:Front|Question|Frage|Vorderseite|Prompt)\b/im.test(norm);
-    const hasBack = /^#{1,4}\s+[*_~]*(?:Back|Answer|Antwort|Rückseite|Solution|Lösung)\b/im.test(norm);
-    return hasFront && hasBack;
+    return HEADING_FRONT_REGEX.test(norm) && HEADING_BACK_REGEX.test(norm);
   }
 
   extract(text: string, _options: ExtractorOptions): ExtractorResult {
@@ -91,8 +92,8 @@ export class MarkdownSectionsExtractor implements ExtractorStrategy {
           cleanedTitle,
           startOffset: node.position.start.offset,
           endOffset: node.position.end.offset,
-          isFront: FRONT_ALIASES.test(cleanedTitle),
-          isBack: BACK_ALIASES.test(cleanedTitle),
+          isFront: isFrontKeyword(cleanedTitle),
+          isBack: isBackKeyword(cleanedTitle),
         });
       }
     }
@@ -141,11 +142,11 @@ export class MarkdownSectionsExtractor implements ExtractorStrategy {
       if (node.type === "heading" && node.depth === sectionDepth) {
         const title = (toString(node) || "").trim();
         const cleanedTitle = cleanHeadingTitle(title);
-        const isFront = FRONT_ALIASES.test(cleanedTitle);
+        const isFront = isFrontKeyword(cleanedTitle);
 
         // If we already have a Front section in currentCard and encounter another Front heading,
         // it means a new card is starting!
-        const alreadyHasFront = currentCard.sections.some((s) => FRONT_ALIASES.test(s.normalizedTitle));
+        const alreadyHasFront = currentCard.sections.some((s) => isFrontKeyword(s.normalizedTitle));
         if (isFront && alreadyHasFront) {
           finalizeCurrentCard();
         }
@@ -197,9 +198,9 @@ export class MarkdownSectionsExtractor implements ExtractorStrategy {
       const customFields: Record<string, string> = {};
 
       for (const section of rawCard.sections) {
-        if (FRONT_ALIASES.test(section.normalizedTitle)) {
+        if (isFrontKeyword(section.normalizedTitle)) {
           front = front ? `${front}\n\n${section.content}` : section.content;
-        } else if (BACK_ALIASES.test(section.normalizedTitle)) {
+        } else if (isBackKeyword(section.normalizedTitle)) {
           back = back ? `${back}\n\n${section.content}` : section.content;
         } else {
           // Custom field: preserve original title format (e.g. "Notes", "Sources", "Code Example")
