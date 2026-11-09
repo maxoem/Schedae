@@ -21,6 +21,7 @@ describe("Demo Markdown Files Extraction Verification", () => {
   const header2Content = loadDemoFile("header-format2.md");
   const bulletContent = loadDemoFile("bulletpoint-format.md");
   const bullet2Content = loadDemoFile("bulletpoint-format2.md");
+  const bullet3Content = loadDemoFile("bulletpoint-format3.md");
 
   describe("header-format.md (# Karte / ## Frage / ## Antwort)", () => {
     test("MarkdownSectionsExtractor canExtract identifies the format", () => {
@@ -178,6 +179,20 @@ describe("Demo Markdown Files Extraction Verification", () => {
       assert.ok(card2.back.includes("Distanzfunktion (Metrik)"));
       assert.ok(card2.back.includes("Mathematischer Hinweis zur"));
       assert.ok(!card2.back.includes("**Rückseite:**") && !card2.back.includes("**Rückseite:**"), "Back should not contain marker");
+    });
+  });
+
+  describe("bulletpoint-format3.md (#### **Karte / * **Vorderseite:** / * **Rückseite:**)", () => {
+    test("DeckParserService parses bulletpoint-format3.md with complete questions and answers", () => {
+      const result = DeckParserService.parse(bullet3Content);
+      assert.equal(result.success, true);
+      assert.equal(result.cards.length, 3, "Expected 3 cards from bulletpoint-format3.md");
+      assert.ok(result.cards[0].back.trim().length > 0, "Card 1 back must not be empty");
+      assert.ok(result.cards[1].back.trim().length > 0, "Card 2 back must not be empty");
+      assert.ok(result.cards[2].back.trim().length > 0, "Card 3 back must not be empty");
+      assert.ok(result.cards[0].back.includes("Teilraumtopologie"));
+      assert.ok(result.cards[1].back.includes("Untermannigfaltigkeit"));
+      assert.ok(result.cards[2].back.includes("Manifold Hypothesis"));
     });
   });
 
