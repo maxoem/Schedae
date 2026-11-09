@@ -93,12 +93,27 @@ export class AutoDetectExtractor implements ExtractorStrategy {
       }
     }
 
-    // Try extractors in prioritized order
+    // Try extractors in prioritized order (Chain of Responsibility)
+    let bestDegradedResult: ExtractorResult | null = null;
+
     for (const extractor of prioritizedExtractors) {
       if (extractor.canExtract(text)) {
         const res = extractor.extract(text, options);
-        if (res.cards.length > 0) return res;
+        if (res.cards.length > 0) {
+          // Viability guard: a deck extraction is viable if cards have non-empty question and answer content
+          const isViable = res.cards.some((c) => c.front.trim().length > 0 && c.back.trim().length > 0);
+          if (isViable) {
+            return res;
+          }
+          if (!bestDegradedResult) {
+            bestDegradedResult = res;
+          }
+        }
       }
+    }
+
+    if (bestDegradedResult) {
+      return bestDegradedResult;
     }
 
     // 7. No cards extracted

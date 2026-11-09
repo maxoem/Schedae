@@ -9,7 +9,8 @@ import type {
 
 const FRONT_ALIASES = /^(?:front|question|frage|vorderseite|prompt)$/i;
 const BACK_ALIASES = /^(?:back|answer|antwort|rückseite|solution|lösung)$/i;
-const CARD_HEADER_REGEX = /^(?:card|karte)\b/i;
+const CARD_HEADER_REGEX = /^(?:card|karte)\s*[\d.:]/i;
+const KNOWN_METADATA_FIELDS = /^(?:quelle(?:\(n\))?|source|sources|tags|category|kategorie|notes|notizen|extra|hinweis)\b/i;
 
 export class KeyValueExtractor implements ExtractorStrategy {
   readonly id = "key-value";
@@ -53,6 +54,12 @@ export class KeyValueExtractor implements ExtractorStrategy {
 
       // Flashcard invariant: A card is only valid if it contains question/front or answer/back content
       if (!front && !back) {
+        currentCard = {
+          front: "",
+          back: "",
+          customFields: {},
+          lastFieldKey: null,
+        };
         return;
       }
 
@@ -150,8 +157,9 @@ export class KeyValueExtractor implements ExtractorStrategy {
         const normKey = rawKey.replace(/\s*\([^)]*\)$/, "").trim();
         const isFront = FRONT_ALIASES.test(normKey);
         const isBack = BACK_ALIASES.test(normKey);
+        const isKnownMetadata = KNOWN_METADATA_FIELDS.test(normKey) || KNOWN_METADATA_FIELDS.test(rawKey);
 
-        if (isFront || isBack || rawKey.length > 1) {
+        if (isFront || isBack || isKnownMetadata || !currentCard.lastFieldKey) {
           // If this is another Front field and we already have a Front field populated,
           // it means Card N+1 has started!
           if (isFront && currentCard.front.trim().length > 0) {
@@ -165,10 +173,22 @@ export class KeyValueExtractor implements ExtractorStrategy {
             currentCard.back = value;
             currentCard.lastFieldKey = "back";
           } else {
-            // Custom field: preserve full field name (e.g. "Quelle(n)", "Notes", etc.)
+            // Known custom metadata field (e.g. "Quelle(n)", "Notes", etc.)
             currentCard.customFields[rawKey] = value;
             currentCard.lastFieldKey = rawKey;
           }
+          continue;
+        } else if (currentCard.lastFieldKey === "back") {
+          // If we are currently collecting the Answer/Back body, arbitrary bullet points with colons
+          // (e.g. "* **Definition:** ...", "* **Bedeutung:** ...") are part of the back content!
+          currentCard.back += (currentCard.back ? "\n" : "") + line;
+          continue;
+        } else if (currentCard.lastFieldKey === "front") {
+          currentCard.front += (currentCard.front ? "\n" : "") + line;
+          continue;
+        } else if (currentCard.lastFieldKey && currentCard.customFields[currentCard.lastFieldKey] !== undefined) {
+          currentCard.customFields[currentCard.lastFieldKey] +=
+            (currentCard.customFields[currentCard.lastFieldKey] ? "\n" : "") + line;
           continue;
         }
       }
