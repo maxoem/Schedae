@@ -17,9 +17,12 @@ export class KeyValueExtractor implements ExtractorStrategy {
 
   canExtract(text: string): boolean {
     if (!text || text.trim().length === 0) return false;
-    const hasFront = /(?:^|\n)[ \t]*[-*+]?[ \t]*(?:\*\*|__)?(?:Front|Question|Frage|Vorderseite|Prompt)(?:\*\*|__)?(?:\s*\([^)]*\))?[ \t]*:/im.test(text);
-    const hasBack = /(?:^|\n)[ \t]*[-*+]?[ \t]*(?:\*\*|__)?(?:Back|Answer|Antwort|Rückseite|Solution|Lösung)(?:\*\*|__)?(?:\s*\([^)]*\))?[ \t]*:/im.test(text);
-    return hasFront && hasBack;
+    const norm = text.normalize("NFC");
+    const hasBulletFront = /(?:^|\n)[ \t]*[-*+][ \t]+(?:\*\*|__)?(?:Front|Question|Frage|Vorderseite|Prompt)(?:\*\*|__)?(?:\s*\([^)]*\))?[ \t]*:/im.test(norm);
+    const hasBulletBack = /(?:^|\n)[ \t]*[-*+][ \t]+(?:\*\*|__)?(?:Back|Answer|Antwort|Rückseite|Solution|Lösung)(?:\*\*|__)?(?:\s*\([^)]*\))?[ \t]*:/im.test(norm);
+    const hasPlainFront = /(?:^|\n)[ \t]*(?:Front|Question|Frage|Vorderseite|Prompt)(?:\s*\([^)]*\))?[ \t]*:/im.test(norm);
+    const hasPlainBack = /(?:^|\n)[ \t]*(?:Back|Answer|Antwort|Rückseite|Solution|Lösung)(?:\s*\([^)]*\))?[ \t]*:/im.test(norm);
+    return (hasBulletFront && hasBulletBack) || (hasPlainFront && hasPlainBack);
   }
 
   extract(text: string, options: ExtractorOptions): ExtractorResult {
@@ -48,7 +51,8 @@ export class KeyValueExtractor implements ExtractorStrategy {
       const back = dedentText(currentCard.back);
       const hasCustom = Object.keys(currentCard.customFields).length > 0;
 
-      if (!front && !back && !hasCustom) {
+      // Flashcard invariant: A card is only valid if it contains question/front or answer/back content
+      if (!front && !back) {
         return;
       }
 

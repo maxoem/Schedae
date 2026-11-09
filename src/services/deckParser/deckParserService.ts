@@ -87,7 +87,7 @@ export class DeckParserService {
    */
   public static normalizeInput(text: string, model: "auto" | "gemini" | "chatgpt" | "claude" = "auto"): string {
     if (!text) return "";
-    let s = text;
+    let s = text.normalize("NFC");
     if (model === "gemini") {
       s = s
         .replace(/\[cite_start\]/gi, "")

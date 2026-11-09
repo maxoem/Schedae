@@ -8,8 +8,8 @@
       "back": "Eine Ableitung ist die formale Sequenz von Substitutionen, durch die ein String aus dem Startsymbol der Grammatik erzeugt wird."
     },
     {
-      "front": "Was ist die grundlegende Idee hinter dem Modell der Turing-Maschine und warum ist dieses Konzept so zentral für die theoretische Informatik?",
-      "back": "Die Turing-Maschine ist ein weitaus genaueres mathematisches Modell eines universellen Computers, das mit einem unbegrenzten und uneingeschränkten Speicher arbeitet."
+      "front": "Was ist die grundlegende Idee hinter dem Modell der Turing-Maschine und warum ist dieses Konzept so zentral für die theoretische Informatik?",
+      "back": "Die Turing-Maschine ist ein weitaus genaueres mathematisches Modell eines universellen Computers, das mit einem unbegrenzten und uneingeschränkten Speicher arbeitet."
     },
     {
       "front": "Wie ist die Chomsky-Normalform (CNF) definiert und welche rigorosen algorithmischen Schritte sind zur Transformation einer beliebigen kontextfreien Grammatik in diese Form notwendig?",

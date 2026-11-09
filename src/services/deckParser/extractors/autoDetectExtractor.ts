@@ -60,22 +60,45 @@ export class AutoDetectExtractor implements ExtractorStrategy {
     // 3. Inspect structure with FormatDetector
     const heuristic = FormatDetector.detect(text);
 
-    // 4. Try Hierarchical Markdown Headings & Multi-Section Cards
-    if (this.markdownSectionsExtractor.canExtract(text)) {
-      const res = this.markdownSectionsExtractor.extract(text, options);
-      if (res.cards.length > 0) return res;
+    // 4. Prioritize candidate extractors based on detected pattern heuristic
+    const prioritizedExtractors: ExtractorStrategy[] = [];
+
+    switch (heuristic.patternId) {
+      case "json":
+        prioritizedExtractors.push(this.jsonExtractor);
+        break;
+      case "markdown-sections":
+      case "markdown-headings":
+        prioritizedExtractors.push(this.markdownSectionsExtractor);
+        break;
+      case "bullet-list":
+        prioritizedExtractors.push(this.keyValueExtractor);
+        break;
+      case "bold-italic":
+      case "generic-qa":
+        prioritizedExtractors.push(this.regexExtractor);
+        break;
     }
 
-    // 5. Try Bullet Lists & Key-Value cards
-    if (this.keyValueExtractor.canExtract(text)) {
-      const res = this.keyValueExtractor.extract(text, options);
-      if (res.cards.length > 0) return res;
+    // Append remaining extractors as fallback cascade
+    const fallbackChain: ExtractorStrategy[] = [
+      this.markdownSectionsExtractor,
+      this.keyValueExtractor,
+      this.regexExtractor,
+    ];
+
+    for (const extractor of fallbackChain) {
+      if (!prioritizedExtractors.includes(extractor)) {
+        prioritizedExtractors.push(extractor);
+      }
     }
 
-    // 6. Fallback to Regex / delimiter extractor
-    const regexRes = this.regexExtractor.extract(text, options);
-    if (regexRes.cards.length > 0) {
-      return regexRes;
+    // Try extractors in prioritized order
+    for (const extractor of prioritizedExtractors) {
+      if (extractor.canExtract(text)) {
+        const res = extractor.extract(text, options);
+        if (res.cards.length > 0) return res;
+      }
     }
 
     // 7. No cards extracted
