@@ -12,7 +12,7 @@ import { DeckParserService } from "@/services/deckParser/deckParserService";
 import type { DeckParseResult } from "@/services/deckParser/types";
 import { WORKSPACE_SAMPLES } from "@/services/deckParser/sampleData";
 import type { Stencil } from "@/lib/extraction/types";
-import { createApkg } from "@/converters/jsonToApkg";
+import { createApkg, type NoteTypeMode } from "@/converters/jsonToApkg";
 
 export type AiModelPresetId = "auto" | "gemini" | "chatgpt" | "claude";
 export type ParserRuleId = "auto" | "generic" | "headings" | "bold-italic" | "custom";
@@ -31,6 +31,8 @@ const STORAGE_KEYS = {
   DECK_NAME: "schedae-workspace-deck-name",
   SPLIT_SETTINGS: "schedae-workspace-split-settings",
   TEMPLATE: "schedae-workspace-template",
+  NOTE_TYPE_MODE: "schedae-workspace-note-type-mode",
+  CUSTOM_NOTE_TYPE_NAME: "schedae-workspace-custom-note-type-name",
   MODEL: "schedae-workspace-model",
   VIEW_MODE: "schedae-workspace-view-mode",
   BUILDER_BATCHES: "schedae-workspace-builder-batches",
@@ -65,6 +67,15 @@ export function useDeckWorkspace(aiStencil?: Stencil | null) {
 
   const [selectedTemplate, setSelectedTemplate] = useState<CardTemplateId>(() => {
     return (localStorage.getItem(STORAGE_KEYS.TEMPLATE) as CardTemplateId) || "markdown_basic";
+  });
+
+  const [noteTypeMode, setNoteTypeMode] = useState<NoteTypeMode>(() => {
+    const saved = localStorage.getItem(STORAGE_KEYS.NOTE_TYPE_MODE);
+    return saved === "per_schema" ? "per_schema" : "unified";
+  });
+
+  const [customNoteTypeName, setCustomNoteTypeName] = useState<string>(() => {
+    return localStorage.getItem(STORAGE_KEYS.CUSTOM_NOTE_TYPE_NAME) || "";
   });
 
   const [selectedModel, setSelectedModel] = useState<AiModelPresetId>(() => {
@@ -104,12 +115,14 @@ export function useDeckWorkspace(aiStencil?: Stencil | null) {
 
   const [splitSettings, setSplitSettingsState] = useState<SplitSettings>(() => {
     try {
-      const saved = localStorage.getItem(STORAGE_KEYS.SPLIT_SETTINGS);
-      if (saved) return JSON.parse(saved);
       const rule = localStorage.getItem(STORAGE_KEYS.PARSER_RULE);
+      if (rule === "custom") {
+        const saved = localStorage.getItem(STORAGE_KEYS.SPLIT_SETTINGS);
+        if (saved) return JSON.parse(saved);
+      }
       if (rule === "headings") return PREDEFINED_EXTRACTION_SETS[0];
       if (rule === "bold-italic") return PREDEFINED_EXTRACTION_SETS[1];
-      return PREDEFINED_EXTRACTION_SETS[2];
+      return DEFAULT_SPLIT_SETTINGS;
     } catch {
       return DEFAULT_SPLIT_SETTINGS;
     }
@@ -124,11 +137,25 @@ export function useDeckWorkspace(aiStencil?: Stencil | null) {
   const [exportError, setExportError] = useState<string | null>(null);
   const [isSheetOpen, setIsSheetOpen] = useState(false);
 
+  const buildParseOptions = useCallback(
+    () => ({
+      strictJson: validateJson,
+      splitSettings: parserRule === "auto" ? undefined : splitSettings,
+      extractorId: parserRule === "custom" ? "regex" : undefined,
+      aiStencil,
+      normalizeModel: selectedModel,
+      parserMode,
+      extractTopicBadges,
+    }),
+    [validateJson, parserRule, splitSettings, aiStencil, selectedModel, parserMode, extractTopicBadges]
+  );
+
   // Parse result for the current sourceText draft
   const [draftParseResult, setDraftParseResult] = useState<DeckParseResult>(() =>
     DeckParserService.parse(sourceText, {
       strictJson: validateJson,
-      splitSettings,
+      splitSettings: parserRule === "auto" ? undefined : splitSettings,
+      extractorId: parserRule === "custom" ? "regex" : undefined,
       aiStencil,
       normalizeModel: selectedModel,
       parserMode,
@@ -145,14 +172,7 @@ export function useDeckWorkspace(aiStencil?: Stencil | null) {
     if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
 
     debounceTimerRef.current = setTimeout(() => {
-      const res = DeckParserService.parse(sourceText, {
-        strictJson: validateJson,
-        splitSettings,
-        aiStencil,
-        normalizeModel: selectedModel,
-        parserMode,
-        extractTopicBadges,
-      });
+      const res = DeckParserService.parse(sourceText, buildParseOptions());
 
       setDraftParseResult(res);
       setDraftCards(res.cards);
@@ -168,7 +188,7 @@ export function useDeckWorkspace(aiStencil?: Stencil | null) {
     return () => {
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
     };
-  }, [sourceText, validateJson, splitSettings, aiStencil, selectedModel, parserMode, deckName, extractTopicBadges]);
+  }, [sourceText, buildParseOptions, deckName]);
 
   // Sync state to localStorage
   useEffect(() => {
@@ -192,6 +212,14 @@ export function useDeckWorkspace(aiStencil?: Stencil | null) {
   }, [selectedTemplate]);
 
   useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.NOTE_TYPE_MODE, noteTypeMode);
+  }, [noteTypeMode]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.CUSTOM_NOTE_TYPE_NAME, customNoteTypeName);
+  }, [customNoteTypeName]);
+
+  useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.MODEL, selectedModel);
   }, [selectedModel]);
 
@@ -210,8 +238,8 @@ export function useDeckWorkspace(aiStencil?: Stencil | null) {
       setSplitSettingsState(PREDEFINED_EXTRACTION_SETS[0]);
     } else if (rule === "bold-italic") {
       setSplitSettingsState(PREDEFINED_EXTRACTION_SETS[1]);
-    } else if (rule === "generic") {
-      setSplitSettingsState(PREDEFINED_EXTRACTION_SETS[2]);
+    } else if (rule === "generic" || rule === "auto") {
+      setSplitSettingsState(DEFAULT_SPLIT_SETTINGS);
     } else if (rule === "custom") {
       setSplitSettingsState((prev) => ({ ...prev, id: "custom", name: "Custom" }));
     }
@@ -261,8 +289,8 @@ export function useDeckWorkspace(aiStencil?: Stencil | null) {
 
   // Highlights for SyntaxEditor (including custom fields)
   const highlightPatterns = useMemo<HighlightMarkerPattern[]>(
-    () => buildHighlightPatterns(splitSettings, customFieldNames),
-    [splitSettings, customFieldNames]
+    () => buildHighlightPatterns(parserRule === "auto" ? DEFAULT_SPLIT_SETTINGS : splitSettings, customFieldNames),
+    [parserRule, splitSettings, customFieldNames]
   );
 
   // Batch management: Add current sourceText as a new batch and clear editor
@@ -340,7 +368,10 @@ export function useDeckWorkspace(aiStencil?: Stencil | null) {
     setExportError(null);
     try {
       const resolvedDeckName = deckName.trim() || "Exported_Deck";
-      const blob = await createApkg(cardsToExport, resolvedDeckName, selectedTemplate, deckCss);
+      const blob = await createApkg(cardsToExport, resolvedDeckName, selectedTemplate, deckCss, {
+        noteTypeMode,
+        customNoteTypeName,
+      });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -352,7 +383,7 @@ export function useDeckWorkspace(aiStencil?: Stencil | null) {
     } finally {
       setIsProcessing(false);
     }
-  }, [deckCards, draftCards, deckName, selectedTemplate, deckCss]);
+  }, [deckCards, draftCards, deckName, selectedTemplate, deckCss, noteTypeMode, customNoteTypeName]);
 
   return {
     sourceText,
@@ -366,6 +397,10 @@ export function useDeckWorkspace(aiStencil?: Stencil | null) {
     setDeckName,
     selectedTemplate,
     setSelectedTemplate,
+    noteTypeMode,
+    setNoteTypeMode,
+    customNoteTypeName,
+    setCustomNoteTypeName,
     selectedModel,
     setSelectedModel,
     parserRule,

@@ -3,6 +3,10 @@ export type CardTemplateId = "default" | "modern_light" | "modern_dark" | "markd
 export interface CardTemplateConfig {
   id: CardTemplateId;
   label: string;
+  /** Anki Note Type name stored in col.models. */
+  noteTypeName: string;
+  /** Anki Card Type name stored in tmpls[0].name. */
+  cardTypeName: string;
   css: string;
   qfmt: string;
   afmt: string;
@@ -240,27 +244,35 @@ export const CARD_TEMPLATES: Record<CardTemplateId, CardTemplateConfig> = {
   default: {
     id: "default",
     label: "Basic (Anki Default)",
+    noteTypeName: "Basic (Schedae)",
+    cardTypeName: "Card 1",
     css: ".card { font-family: arial; font-size: 20px; text-align: center; color: black; background-color: white; } .card-topic-badge { display: inline-block; font-size: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.05em; padding: 2px 8px; border-radius: 9999px; background-color: rgba(0,0,0,0.07); color: #555; margin-bottom: 12px; }",
     qfmt: "{{Front}}",
-    afmt: "{{FrontSide}}\\n\\n<hr id=answer>\\n\\n{{Back}}",
+    afmt: "{{FrontSide}}\n\n<hr id=answer>\n\n{{Back}}",
   },
   modern_light: {
     id: "modern_light",
     label: "Modern Clean",
+    noteTypeName: "Modern Clean",
+    cardTypeName: "Modern Clean",
     css: ".card { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 18px; text-align: center; color: #27272a; background-color: #ffffff; line-height: 1.6; padding: 20px; } .card.night_mode { background-color: #1a1a1a; color: #e5e5e5; } hr#answer { border: 0; border-bottom: 1px solid #e4e4e7; margin: 20px auto; width: 80%; } .night_mode hr#answer { border-bottom: 1px solid #3f3f46; } .front { font-weight: 600; font-size: 22px; margin-bottom: 15px; } .back { font-size: 18px; } .card-topic-badge { display: inline-block; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; padding: 3px 10px; border-radius: 9999px; background-color: rgba(0,0,0,0.06); color: #4b5563; margin-bottom: 14px; } .card.night_mode .card-topic-badge { background-color: rgba(255,255,255,0.12); color: #9ca3af; }",
     qfmt: "<div class='front'>{{Front}}</div>",
-    afmt: "{{FrontSide}}\\n\\n<hr id=answer>\\n\\n<div class='back'>{{Back}}</div>",
+    afmt: "{{FrontSide}}\n\n<hr id=answer>\n\n<div class='back'>{{Back}}</div>",
   },
   modern_dark: {
     id: "modern_dark",
     label: "Modern Dark",
+    noteTypeName: "Modern Dark",
+    cardTypeName: "Modern Dark",
     css: ".card { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 18px; text-align: center; color: #e5e5e5; background-color: #18181b; line-height: 1.6; padding: 20px; } hr#answer { border: 0; border-bottom: 1px solid #3f3f46; margin: 20px auto; width: 80%; } .front { font-weight: 600; font-size: 22px; margin-bottom: 15px; color: #fafafa; } .back { font-size: 18px; } .card-topic-badge { display: inline-block; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; padding: 3px 10px; border-radius: 9999px; background-color: rgba(255,255,255,0.12); color: #9ca3af; margin-bottom: 14px; }",
     qfmt: "<div class='front'>{{Front}}</div>",
-    afmt: "{{FrontSide}}\\n\\n<hr id=answer>\\n\\n<div class='back'>{{Back}}</div>",
+    afmt: "{{FrontSide}}\n\n<hr id=answer>\n\n<div class='back'>{{Back}}</div>",
   },
   markdown_basic: {
     id: "markdown_basic",
-    label: "Markdown Basic (KaTeX)",
+    label: "Markdown+Katex",
+    noteTypeName: "Markdown+Katex",
+    cardTypeName: "Markdown+Katex",
     css: `
 /* --- Main Card Container --- */
 .card {

@@ -1,4 +1,19 @@
 import type { DetectedFormat } from "../types";
+import {
+  isFrontKeyword,
+  isBackKeyword,
+  CARD_KEYWORDS_PATTERN,
+  FRONT_KEYWORDS_PATTERN,
+  HEADING_FRONT_REGEX,
+  HEADING_BACK_REGEX,
+  BULLET_FRONT_REGEX,
+  BULLET_BACK_REGEX,
+  BOLD_FRONT_REGEX,
+  BOLD_BACK_REGEX,
+  BOLD_CARD_REGEX,
+  PLAIN_FRONT_REGEX,
+  PLAIN_BACK_REGEX,
+} from "../keywords";
 
 export type DetectedPatternId =
   | "json"
@@ -17,9 +32,6 @@ export interface FormatHeuristicResult {
   hasCustomFields: boolean;
   detectedFields: string[];
 }
-
-const FRONT_FIELD_NAMES = /^(?:front|question|frage|vorderseite|prompt)$/i;
-const BACK_FIELD_NAMES = /^(?:back|answer|antwort|rückseite|solution|lösung)$/i;
 
 /**
  * Extracts a lightweight representative sample (Card 1) from the pasted text
@@ -45,7 +57,8 @@ export function sampleFirstChunk(text: string): string {
   }
 
   // 3. Next top-level heading boundary (e.g. # Card 2 or # Karte 2)
-  const nextCardHeading = trimmed.search(/\n\s*#{1,2}\s+(?:Card|Karte|\d+\b)/i);
+  const nextCardHeadingRegex = new RegExp(`\\n\\s*#{1,2}\\s+(?:${CARD_KEYWORDS_PATTERN}|\\d+\\b)`, "i");
+  const nextCardHeading = trimmed.search(nextCardHeadingRegex);
   if (nextCardHeading !== -1 && nextCardHeading > 20) {
     return trimmed.substring(0, nextCardHeading);
   }
@@ -59,7 +72,7 @@ export class FormatDetector {
    * Analyzes the first card or chunk of a paste and classifies its format signature.
    */
   public static detect(rawText: string): FormatHeuristicResult {
-    const text = (rawText || "").trim();
+    const text = (rawText || "").normalize("NFC").trim();
     if (!text) {
       return {
         patternId: "unknown",
@@ -71,7 +84,7 @@ export class FormatDetector {
       };
     }
 
-    const sample = sampleFirstChunk(text);
+    const sample = sampleFirstChunk(text).normalize("NFC");
 
     // 1. JSON Detection
     if (
@@ -95,8 +108,8 @@ export class FormatDetector {
           const keys = Object.keys(firstCard);
           const customKeys = keys.filter(
             (k) =>
-              !FRONT_FIELD_NAMES.test(k) &&
-              !BACK_FIELD_NAMES.test(k) &&
+              !isFrontKeyword(k) &&
+              !isBackKeyword(k) &&
               !["id", "tags", "guid", "mid", "mod", "usn", "cards", "deckId", "deckName"].includes(k)
           );
 
@@ -115,22 +128,22 @@ export class FormatDetector {
     }
 
     // 2. Hierarchical Markdown Headings (# Card 1 / ## Front / ## Back / ## Notes)
-    const headingFrontMatch = sample.match(/^#{1,4}\s+([^\n]+)/im);
-    const hasHeadingFront = /^#{1,4}\s+(?:Front|Question|Frage|Vorderseite|Prompt)\b/im.test(sample);
-    const hasHeadingBack = /^#{1,4}\s+(?:Back|Answer|Antwort|Rückseite|Solution|Lösung)\b/im.test(sample);
+    const hasHeadingFront = HEADING_FRONT_REGEX.test(sample);
+    const hasHeadingBack = HEADING_BACK_REGEX.test(sample);
 
     if (hasHeadingFront && hasHeadingBack) {
       // Find all heading titles in the sample
       const allHeadings = Array.from(sample.matchAll(/^#{1,4}\s+([^\n]+)/gim)).map((m) =>
-        m[1].replace(/[:*#_]/g, "").trim()
+        m[1].normalize("NFC").replace(/[:*#_]/g, "").trim()
       );
 
+      const cardPrefixRegex = new RegExp(`^(?:${CARD_KEYWORDS_PATTERN})\\b`, "i");
       const customFields = allHeadings.filter(
-        (h) => !FRONT_FIELD_NAMES.test(h) && !BACK_FIELD_NAMES.test(h) && !/^Card\b/i.test(h) && !/^Karte\b/i.test(h)
+        (h) => !isFrontKeyword(h) && !isBackKeyword(h) && !cardPrefixRegex.test(h)
       );
 
-      const hasTopCardHeader = /^#\s+(?:Card|Karte|\d+\b)/im.test(sample);
-      const isDepth3Headings = /^###\s+(?:Question|Frage|Front)/im.test(sample);
+      const hasTopCardHeader = new RegExp(`^#\\s+(?:${CARD_KEYWORDS_PATTERN}|\\d+\\b)`, "im").test(sample);
+      const isDepth3Headings = new RegExp(`^###\\s+[*_~]*(?:${FRONT_KEYWORDS_PATTERN})\\b`, "im").test(sample);
 
       if (customFields.length > 0 || hasTopCardHeader) {
         return {
@@ -165,8 +178,8 @@ export class FormatDetector {
     }
 
     // 3. Bullet List Key-Value (- Front: ... / - Back: ... / - Notes: ...)
-    const hasBulletFront = /^[ \t]*[-*+][ \t]+(?:\*\*|__)?(?:Front|Question|Frage|Vorderseite|Prompt)(?:\*\*|__)?(?:\s*\([^)]*\))?[ \t]*:/im.test(sample);
-    const hasBulletBack = /^[ \t]*[-*+][ \t]+(?:\*\*|__)?(?:Back|Answer|Antwort|Rückseite|Solution|Lösung)(?:\*\*|__)?(?:\s*\([^)]*\))?[ \t]*:/im.test(sample);
+    const hasBulletFront = BULLET_FRONT_REGEX.test(sample);
+    const hasBulletBack = BULLET_BACK_REGEX.test(sample);
 
     if (hasBulletFront && hasBulletBack) {
       const allBulletKeys = Array.from(
@@ -175,7 +188,7 @@ export class FormatDetector {
 
       const customFields = allBulletKeys.filter((k) => {
         const norm = k.replace(/\s*\([^)]*\)$/, "").trim();
-        return !FRONT_FIELD_NAMES.test(norm) && !BACK_FIELD_NAMES.test(norm);
+        return !isFrontKeyword(norm) && !isBackKeyword(norm);
       });
 
       return {
@@ -189,9 +202,9 @@ export class FormatDetector {
     }
 
     // 4. Bold / Italic Delimiters (**Front:** / **Back:** / **Karte**)
-    const hasBoldFront = /(?:\*\*|__|\*|_)(?:Front|Question|Frage|Vorderseite):?(?:\*\*|__|\*|_):?\s*/i.test(sample);
-    const hasBoldBack = /(?:\*\*|__|\*|_)(?:Back|Answer|Antwort|Rückseite):?(?:\*\*|__|\*|_):?\s*/i.test(sample);
-    const hasBoldCard = /(?:\*\*|__)(?:Card|Karte)(?:\*\*|__)/i.test(sample);
+    const hasBoldFront = BOLD_FRONT_REGEX.test(sample);
+    const hasBoldBack = BOLD_BACK_REGEX.test(sample);
+    const hasBoldCard = BOLD_CARD_REGEX.test(sample);
 
     if ((hasBoldFront && hasBoldBack) || hasBoldCard) {
       return {
@@ -205,8 +218,8 @@ export class FormatDetector {
     }
 
     // 5. Plain Q&A Key-Value (Q: / A: or Front: / Back:)
-    const hasPlainFront = /^[ \t]*(?:Q|Front|Question|Frage|Vorderseite)[ \t]*:/im.test(sample);
-    const hasPlainBack = /^[ \t]*(?:A|Back|Answer|Antwort|Rückseite)[ \t]*:/im.test(sample);
+    const hasPlainFront = PLAIN_FRONT_REGEX.test(sample);
+    const hasPlainBack = PLAIN_BACK_REGEX.test(sample);
 
     if (hasPlainFront && hasPlainBack) {
       const allPlainKeys = Array.from(
@@ -214,7 +227,7 @@ export class FormatDetector {
       ).map((m) => m[1].trim());
 
       const customFields = allPlainKeys.filter(
-        (k) => !FRONT_FIELD_NAMES.test(k) && !BACK_FIELD_NAMES.test(k) && k.length > 1
+        (k) => !isFrontKeyword(k) && !isBackKeyword(k) && k.length > 1
       );
 
       return {

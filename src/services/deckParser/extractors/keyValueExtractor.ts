@@ -6,10 +6,16 @@ import type {
   ExtractorStrategy,
   DiagnosticIssue,
 } from "../types";
-
-const FRONT_ALIASES = /^(?:front|question|frage|vorderseite|prompt)$/i;
-const BACK_ALIASES = /^(?:back|answer|antwort|rückseite|solution|lösung)$/i;
-const CARD_HEADER_REGEX = /^(?:card|karte)\b/i;
+import {
+  isFrontKeyword,
+  isBackKeyword,
+  isMetadataKeyword,
+  isCardHeader,
+  BULLET_FRONT_REGEX,
+  BULLET_BACK_REGEX,
+  PLAIN_FRONT_REGEX,
+  PLAIN_BACK_REGEX,
+} from "../keywords";
 
 export class KeyValueExtractor implements ExtractorStrategy {
   readonly id = "key-value";
@@ -17,9 +23,10 @@ export class KeyValueExtractor implements ExtractorStrategy {
 
   canExtract(text: string): boolean {
     if (!text || text.trim().length === 0) return false;
-    const hasFront = /(?:^|\n)[ \t]*[-*+]?[ \t]*(?:\*\*|__)?(?:Front|Question|Frage|Vorderseite|Prompt)(?:\*\*|__)?(?:\s*\([^)]*\))?[ \t]*:/im.test(text);
-    const hasBack = /(?:^|\n)[ \t]*[-*+]?[ \t]*(?:\*\*|__)?(?:Back|Answer|Antwort|Rückseite|Solution|Lösung)(?:\*\*|__)?(?:\s*\([^)]*\))?[ \t]*:/im.test(text);
-    return hasFront && hasBack;
+    const norm = text.normalize("NFC");
+    const hasBullet = BULLET_FRONT_REGEX.test(norm) && BULLET_BACK_REGEX.test(norm);
+    const hasPlain = PLAIN_FRONT_REGEX.test(norm) && PLAIN_BACK_REGEX.test(norm);
+    return hasBullet || hasPlain;
   }
 
   extract(text: string, options: ExtractorOptions): ExtractorResult {
@@ -48,7 +55,14 @@ export class KeyValueExtractor implements ExtractorStrategy {
       const back = dedentText(currentCard.back);
       const hasCustom = Object.keys(currentCard.customFields).length > 0;
 
-      if (!front && !back && !hasCustom) {
+      // Flashcard invariant: A card is only valid if it contains question/front or answer/back content
+      if (!front && !back) {
+        currentCard = {
+          front: "",
+          back: "",
+          customFields: {},
+          lastFieldKey: null,
+        };
         return;
       }
 
@@ -108,7 +122,7 @@ export class KeyValueExtractor implements ExtractorStrategy {
       // Heading-style card delimiters (e.g. "### **Karte 1.1: ...**" or "# Card 2")
       if (/^#{1,6}\s+/.test(trimmed)) {
         const headingText = trimmed.replace(/^#+\s+/, "").replace(/^[*_~`]+|[*_~`]+$/g, "").trim();
-        if (CARD_HEADER_REGEX.test(headingText)) {
+        if (isCardHeader(headingText)) {
           finalizeCard();
           currentCard.title = headingText;
           continue;
@@ -137,17 +151,18 @@ export class KeyValueExtractor implements ExtractorStrategy {
         value = value.replace(/^\*\*\s*/, "").trim();
 
         // Check if rawKey is a card boundary header, e.g. "Karte 1.1: ..."
-        if (CARD_HEADER_REGEX.test(rawKey)) {
+        if (isCardHeader(rawKey)) {
           finalizeCard();
           currentCard.title = rawKey;
           continue;
         }
 
         const normKey = rawKey.replace(/\s*\([^)]*\)$/, "").trim();
-        const isFront = FRONT_ALIASES.test(normKey);
-        const isBack = BACK_ALIASES.test(normKey);
+        const isFront = isFrontKeyword(normKey);
+        const isBack = isBackKeyword(normKey);
+        const isKnownMetadata = isMetadataKeyword(normKey) || isMetadataKeyword(rawKey);
 
-        if (isFront || isBack || rawKey.length > 1) {
+        if (isFront || isBack || isKnownMetadata || !currentCard.lastFieldKey) {
           // If this is another Front field and we already have a Front field populated,
           // it means Card N+1 has started!
           if (isFront && currentCard.front.trim().length > 0) {
@@ -161,10 +176,22 @@ export class KeyValueExtractor implements ExtractorStrategy {
             currentCard.back = value;
             currentCard.lastFieldKey = "back";
           } else {
-            // Custom field: preserve full field name (e.g. "Quelle(n)", "Notes", etc.)
+            // Known custom metadata field (e.g. "Quelle(n)", "Notes", etc.)
             currentCard.customFields[rawKey] = value;
             currentCard.lastFieldKey = rawKey;
           }
+          continue;
+        } else if (currentCard.lastFieldKey === "back") {
+          // If we are currently collecting the Answer/Back body, arbitrary bullet points with colons
+          // (e.g. "* **Definition:** ...", "* **Bedeutung:** ...") are part of the back content!
+          currentCard.back += (currentCard.back ? "\n" : "") + line;
+          continue;
+        } else if (currentCard.lastFieldKey === "front") {
+          currentCard.front += (currentCard.front ? "\n" : "") + line;
+          continue;
+        } else if (currentCard.lastFieldKey && currentCard.customFields[currentCard.lastFieldKey] !== undefined) {
+          currentCard.customFields[currentCard.lastFieldKey] +=
+            (currentCard.customFields[currentCard.lastFieldKey] ? "\n" : "") + line;
           continue;
         }
       }

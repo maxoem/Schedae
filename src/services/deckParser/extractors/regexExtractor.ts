@@ -1,10 +1,11 @@
-import type { FlashCard } from "@/converters/types";
 import {
   type SplitSettings,
+  type RegexExtractionOutput,
   PREDEFINED_EXTRACTION_SETS,
-  DEFAULT_SPLIT_SETTINGS,
-  extractFlashcardsFromText,
+  CANONICAL_SPLIT_SETTINGS,
+  extractFlashcardsWithMeta,
 } from "../splitSettings";
+import { isBareFieldLabel } from "../keywords";
 import type { ExtractorOptions, ExtractorResult, ExtractorStrategy, DiagnosticIssue } from "../types";
 
 export class RegexExtractor implements ExtractorStrategy {
@@ -17,26 +18,37 @@ export class RegexExtractor implements ExtractorStrategy {
 
   extract(text: string, options: ExtractorOptions): ExtractorResult {
     const diagnostics: DiagnosticIssue[] = [];
-    const activeSettings = options.splitSettings || DEFAULT_SPLIT_SETTINGS;
+    const activeSettings = options.splitSettings || CANONICAL_SPLIT_SETTINGS;
 
-    // Prioritize activeSettings (user's explicit selection) first
-    let bestExtracted: FlashCard[] = [];
+    // Prioritize activeSettings (explicit selection or canonical default) first
+    let bestOutput: RegexExtractionOutput = {
+      cards: [],
+      markerMatchedCards: 0,
+      positionalFallbackCards: 0,
+    };
     let bestSettings: SplitSettings = activeSettings;
 
     try {
-      bestExtracted = extractFlashcardsFromText(text, activeSettings);
+      bestOutput = extractFlashcardsWithMeta(text, activeSettings);
     } catch {
       // Ignore regex failure in activeSettings
     }
 
-    // Only if activeSettings matched 0 cards, test other predefined candidates as fallback
-    if (bestExtracted.length === 0) {
-      for (const candidate of PREDEFINED_EXTRACTION_SETS) {
-        if (candidate.id === activeSettings.id) continue;
+    // Fall back when activeSettings yielded 0 cards OR failed to match any Q/A markers
+    // (pure positional fallback risks keeping bare keyword labels like "**Vorderseite:**" inside front/back).
+    if (bestOutput.cards.length === 0 || bestOutput.markerMatchedCards === 0) {
+      const candidates = [CANONICAL_SPLIT_SETTINGS, ...PREDEFINED_EXTRACTION_SETS];
+      for (const candidate of candidates) {
+        if (candidate.id && candidate.id === activeSettings.id) continue;
         try {
-          const extracted = extractFlashcardsFromText(text, candidate);
-          if (extracted.length > bestExtracted.length) {
-            bestExtracted = extracted;
+          const output = extractFlashcardsWithMeta(text, candidate);
+          const isBetterMatch =
+            output.markerMatchedCards > bestOutput.markerMatchedCards ||
+            (output.markerMatchedCards === bestOutput.markerMatchedCards &&
+              output.cards.length > bestOutput.cards.length);
+
+          if (isBetterMatch) {
+            bestOutput = output;
             bestSettings = candidate;
           }
         } catch {
@@ -44,6 +56,8 @@ export class RegexExtractor implements ExtractorStrategy {
         }
       }
     }
+
+    const bestExtracted = bestOutput.cards;
 
     if (bestExtracted.length === 0) {
       diagnostics.push({
@@ -59,6 +73,14 @@ export class RegexExtractor implements ExtractorStrategy {
       };
     }
 
+    if (bestOutput.markerMatchedCards === 0 && bestOutput.positionalFallbackCards > 0) {
+      diagnostics.push({
+        id: "regex-positional-fallback",
+        level: "info",
+        message: "No explicit Question/Answer markers matched; cards were split by block position.",
+      });
+    }
+
     // Perform quality checks on extracted cards
     bestExtracted.forEach((card, index) => {
       const front = card.front.trim();
@@ -69,6 +91,13 @@ export class RegexExtractor implements ExtractorStrategy {
           id: `card-${index}-empty-front`,
           level: "warning",
           message: `Card #${index + 1} has an empty question (front).`,
+          cardIndex: index,
+        });
+      } else if (isBareFieldLabel(front)) {
+        diagnostics.push({
+          id: `card-${index}-bare-label-front`,
+          level: "warning",
+          message: `Card #${index + 1} front contains only a field label ('${front}').`,
           cardIndex: index,
         });
       }

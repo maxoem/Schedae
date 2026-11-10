@@ -550,10 +550,11 @@ export default function DeckRemaster() {
                     }
                     className="w-full text-xs bg-background border rounded-md px-2.5 py-1.5 focus:ring-1 focus:ring-ring cursor-pointer"
                   >
-                    <option value="markdown_basic">Markdown Basic (KaTeX + Inter font)</option>
-                    <option value="modern_light">Modern Clean (Light)</option>
-                    <option value="modern_dark">Modern Dark</option>
-                    <option value="default">Basic (Anki Default)</option>
+                    {(Object.keys(CARD_TEMPLATES) as CardTemplateId[]).map((tId) => (
+                      <option key={tId} value={tId}>
+                        {CARD_TEMPLATES[tId].label}
+                      </option>
+                    ))}
                   </select>
                 </div>
 

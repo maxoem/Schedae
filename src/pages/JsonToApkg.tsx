@@ -222,6 +222,11 @@ export default function JsonToApkg() {
           sampleText={workspace.sourceText}
           selectedTemplate={workspace.selectedTemplate}
           onTemplateChange={workspace.setSelectedTemplate}
+          noteTypeMode={workspace.noteTypeMode}
+          onNoteTypeModeChange={workspace.setNoteTypeMode}
+          customNoteTypeName={workspace.customNoteTypeName}
+          onCustomNoteTypeNameChange={workspace.setCustomNoteTypeName}
+          activeCards={workspace.activeCards}
           aiSettings={ai}
           onDeriveStencil={handleAnalyzeStructure}
           clearStencil={handleClearStencil}

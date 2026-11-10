@@ -7,6 +7,7 @@ import { MarkdownSectionsExtractor } from "../extractors/markdownSectionsExtract
 import { KeyValueExtractor } from "../extractors/keyValueExtractor";
 import { JsonExtractor } from "../extractors/jsonExtractor";
 import { FormatDetector } from "../heuristics/formatDetector";
+import { PREDEFINED_EXTRACTION_SETS } from "../splitSettings";
 
 // Resolve paths to the demo files (check src/data first, fallback to test data)
 function loadDemoFile(filename: string): string {
@@ -18,7 +19,11 @@ function loadDemoFile(filename: string): string {
 
 describe("Demo Markdown Files Extraction Verification", () => {
   const headerContent = loadDemoFile("header-format.md");
+  const header2Content = loadDemoFile("header-format2.md");
   const bulletContent = loadDemoFile("bulletpoint-format.md");
+  const bullet2Content = loadDemoFile("bulletpoint-format2.md");
+  const bullet3Content = loadDemoFile("bulletpoint-format3.md");
+  const bullet4Content = loadDemoFile("bulletpoint-format4.md");
 
   describe("header-format.md (# Karte / ## Frage / ## Antwort)", () => {
     test("MarkdownSectionsExtractor canExtract identifies the format", () => {
@@ -57,6 +62,48 @@ describe("Demo Markdown Files Extraction Verification", () => {
       assert.equal(result.success, true);
       assert.equal(result.cards.length, 14);
       assert.equal(result.usedStrategyId, "markdown-sections");
+    });
+  });
+
+  describe("header-format2.md (# Karte / ## Vorderseite / ## **Rückseite:**)", () => {
+    test("MarkdownSectionsExtractor canExtract identifies the format", () => {
+      const extractor = new MarkdownSectionsExtractor();
+      assert.equal(extractor.canExtract(header2Content), true);
+    });
+
+    test("MarkdownSectionsExtractor extracts all 2 cards accurately", () => {
+      const extractor = new MarkdownSectionsExtractor();
+      const result = extractor.extract(header2Content, {});
+
+      assert.equal(result.cards.length, 2, "Expected exactly 2 flashcards from header-format2.md");
+
+      // Verify Card 1 (Topologischer Raum / Topologie)
+      const card1 = result.cards[0];
+      assert.ok(card1.front.includes("Topologie"), "Card 1 front should mention Topologie");
+      assert.ok(card1.front.includes("topologischen Raum"));
+      assert.ok(card1.back.includes("Potenzmenge"));
+      assert.ok(card1.back.includes("Leere Menge und Gesamtmenge"));
+      assert.ok(card1.back.includes("Abgeschlossenheit unter endlichen Schnitten"));
+
+      // Verify Card 2 (Metrischer Raum)
+      const card2 = result.cards[1];
+      assert.ok(card2.front.includes("metrischer Raum"), "Card 2 front should ask about metrischer Raum");
+      assert.ok(card2.back.includes("Distanzfunktion (Metrik)"));
+      assert.ok(card2.back.includes("Mathematischer Hinweis zur"));
+    });
+
+    test("FormatDetector classifies header-format2.md with high confidence", () => {
+      const detection = FormatDetector.detect(header2Content);
+      assert.equal(detection.patternId, "markdown-sections");
+      assert.ok(detection.confidence >= 0.95);
+    });
+
+    test("DeckParserService (Auto-Detect Default) parses header-format2.md end-to-end", () => {
+      const result = DeckParserService.parse(header2Content);
+      assert.equal(result.success, true);
+      assert.equal(result.cards.length, 2);
+      assert.equal(result.usedStrategyId, "markdown-sections");
+      assert.equal(result.detectedFormat, "markdown-headings");
     });
   });
 
@@ -103,6 +150,125 @@ describe("Demo Markdown Files Extraction Verification", () => {
       assert.equal(result.usedStrategyId, "key-value");
       assert.equal(result.detectedFormat, "markdown-sections");
       assert.ok(result.cards.every((c) => c.customFields && Boolean(c.customFields["Quelle(n)"])));
+    });
+  });
+
+  describe("bulletpoint-format2.md (### Karte / **Vorderseite:** / **Rückseite:**)", () => {
+    test("FormatDetector classifies bulletpoint-format2.md as bold-italic", () => {
+      const detection = FormatDetector.detect(bullet2Content);
+      assert.equal(detection.patternId, "bold-italic");
+      assert.ok(detection.confidence >= 0.9);
+    });
+
+    test("DeckParserService (Auto-Detect Default) parses bulletpoint-format2.md end-to-end", () => {
+      const result = DeckParserService.parse(bullet2Content);
+      assert.equal(result.success, true);
+      assert.equal(result.cards.length, 2);
+      assert.equal(result.usedStrategyId, "regex");
+      assert.equal(result.detectedFormat, "custom-delimiters");
+
+      // Verify Card 1
+      const card1 = result.cards[0];
+      assert.ok(card1.front.includes("Topologie"), "Card 1 front should mention Topologie");
+      assert.ok(card1.front.includes("topologischen Raum"));
+      assert.ok(card1.back.includes("Potenzmenge"));
+      assert.ok(card1.back.includes("Leere Menge und Gesamtmenge"));
+      assert.ok(!card1.back.includes("**Rückseite:**") && !card1.back.includes("**Rückseite:**"), "Back should not contain marker");
+
+      // Verify Card 2
+      const card2 = result.cards[1];
+      assert.ok(card2.front.includes("metrischer Raum"), "Card 2 front should ask about metrischer Raum");
+      assert.ok(card2.back.includes("Distanzfunktion (Metrik)"));
+      assert.ok(card2.back.includes("Mathematischer Hinweis zur"));
+      assert.ok(!card2.back.includes("**Rückseite:**") && !card2.back.includes("**Rückseite:**"), "Back should not contain marker");
+    });
+  });
+
+  describe("bulletpoint-format3.md (#### **Karte / * **Vorderseite:** / * **Rückseite:**)", () => {
+    test("DeckParserService parses bulletpoint-format3.md with complete questions and answers", () => {
+      const result = DeckParserService.parse(bullet3Content);
+      assert.equal(result.success, true);
+      assert.equal(result.cards.length, 3, "Expected 3 cards from bulletpoint-format3.md");
+      assert.ok(result.cards[0].back.trim().length > 0, "Card 1 back must not be empty");
+      assert.ok(result.cards[1].back.trim().length > 0, "Card 2 back must not be empty");
+      assert.ok(result.cards[2].back.trim().length > 0, "Card 3 back must not be empty");
+      assert.ok(result.cards[0].back.includes("Teilraumtopologie"));
+      assert.ok(result.cards[1].back.includes("Untermannigfaltigkeit"));
+      assert.ok(result.cards[2].back.includes("Manifold Hypothesis"));
+    });
+  });
+
+  describe("bulletpoint-format4.md (### Karte / **Vorderseite:** / **Rückseite:**)", () => {
+    test("FormatDetector classifies bulletpoint-format4.md as bold-italic", () => {
+      const detection = FormatDetector.detect(bullet4Content);
+      assert.equal(detection.patternId, "bold-italic");
+      assert.ok(detection.confidence >= 0.9);
+    });
+
+    test("DeckParserService (Auto-Detect Default) parses bulletpoint-format4.md end-to-end", () => {
+      const result = DeckParserService.parse(bullet4Content);
+      assert.equal(result.success, true);
+      assert.equal(result.cards.length, 4, "Expected exactly 4 flashcards from bulletpoint-format4.md");
+      assert.equal(result.usedStrategyId, "regex");
+      assert.equal(result.detectedFormat, "custom-delimiters");
+
+      // Verify Card 1
+      const card1 = result.cards[0];
+      assert.ok(card1.front.includes("Topologie"), "Card 1 front should mention Topologie");
+      assert.ok(card1.front.includes("topologischen Raum"));
+      assert.ok(card1.back.includes("Potenzmenge"));
+      assert.ok(card1.back.includes("Leere Menge und Gesamtmenge"));
+
+      // Verify Card 2
+      const card2 = result.cards[1];
+      assert.ok(card2.front.includes("metrischer Raum"), "Card 2 front should ask about metrischer Raum");
+      assert.ok(card2.back.includes("Distanzfunktion (Metrik)"));
+      assert.ok(card2.back.includes("Mathematischer Hinweis zur"));
+
+      // Verify Card 3
+      const card3 = result.cards[2];
+      assert.ok(card3.front.includes("Hausdorff-Raum"), "Card 3 front should ask about Hausdorff-Raum");
+      assert.ok(card3.back.includes("U_x \\cap U_y = \\emptyset"));
+
+      // Verify Card 4
+      const card4 = result.cards[3];
+      assert.ok(card4.front.includes("1. Wann nennt man"), "Card 4 front must include question 1");
+      assert.ok(card4.front.includes("2. Welche Eigenschaften"), "Card 4 front must include question 2");
+      assert.ok(card4.back.includes("1. Definition"), "Card 4 back must begin with definition");
+      assert.ok(card4.back.includes("Hausdorff-Eigenschaft"));
+      assert.ok(card4.back.includes("zweite Abzählbarkeitsaxiom"));
+      assert.ok(card4.back.includes("homöomorph"));
+
+      for (const [idx, card] of result.cards.entries()) {
+        assert.ok(!card.front.includes("Vorderseite:"), `Card #${idx + 1} front must not contain Vorderseite marker`);
+        assert.ok(!card.back.includes("Rückseite:"), `Card #${idx + 1} back must not contain Rückseite marker`);
+      }
+    });
+
+    test("DeckParserService extracts bulletpoint-format4.md cleanly across all predefined presets and stale splitSettings", () => {
+      const staleSettings = {
+        id: "stale-custom",
+        name: "Stale",
+        cardSeparators: "### Karte, ---",
+        questionMarkers: "Frage:",
+        answerMarkers: "Antwort:",
+        includeCardSeparatorMarker: false,
+        includeQuestionMarker: false,
+        includeAnswerMarker: false,
+        ignoreMarkerBrackets: true,
+      };
+
+      for (const settings of [...PREDEFINED_EXTRACTION_SETS, staleSettings]) {
+        const result = DeckParserService.parse(bullet4Content, { splitSettings: settings });
+        assert.equal(result.success, true, `Preset '${settings.id}' should parse successfully`);
+        assert.equal(result.cards.length, 4, `Preset '${settings.id}' should yield 4 cards`);
+        assert.ok(result.cards[3].front.includes("1. Wann nennt man"), `Preset '${settings.id}' Card 4 front must contain full question`);
+        assert.ok(result.cards[3].front.includes("2. Welche Eigenschaften"), `Preset '${settings.id}' Card 4 front must contain second question`);
+        for (const [idx, card] of result.cards.entries()) {
+          assert.ok(!card.front.includes("Vorderseite:"), `Preset '${settings.id}' Card #${idx + 1} front leaked marker`);
+          assert.ok(!card.back.includes("Rückseite:"), `Preset '${settings.id}' Card #${idx + 1} back leaked marker`);
+        }
+      }
     });
   });
 

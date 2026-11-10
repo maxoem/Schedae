@@ -1,5 +1,23 @@
 [
   {
+    "id": 436882446,
+    "tag": "v1.0.5",
+    "name": "v1.0.5",
+    "publishedAt": "2026-11-06T19:07:24Z",
+    "body": "## What's Changed\r\n* feat(extraction): Retrieving label candidates from cards and population internal card schema, making them available in Anki by @maxoem in https://github.com/maxoem/schedae/pull/14\r\n* build(deps): bump @hono/node-server from 1.19.13 to 1.19.18 by @dependabot[bot] in https://github.com/maxoem/schedae/pull/13\r\n* build(deps): bump fast-uri from 3.1.0 to 3.1.9 by @dependabot[bot] in https://github.com/maxoem/schedae/pull/12\r\n* build(deps): bump dompurify from 3.3.3 to 3.4.17 by @dependabot[bot] in https://github.com/maxoem/schedae/pull/11\r\n\r\n## New Contributors\r\n* @dependabot[bot] made their first contribution in https://github.com/maxoem/schedae/pull/13\r\n\r\n**Full Changelog**: https://github.com/maxoem/schedae/compare/v1.0.4...v1.0.5",
+    "url": "https://github.com/maxoem/schedae/releases/tag/v1.0.5",
+    "isPrerelease": false
+  },
+  {
+    "id": 422091649,
+    "tag": "v1.0.4",
+    "name": "v1.0.4",
+    "publishedAt": "2026-10-23T16:49:57Z",
+    "body": "## What's Changed\r\n* fix(workplace): when viewd on small-width devices the layout is being… by @maxoem in https://github.com/maxoem/schedae/pull/8\r\n* Fixture test setup by @maxoem in https://github.com/maxoem/schedae/pull/9\r\n\r\n## New Contributors\r\n-\r\n\r\n**Full Changelog**: https://github.com/maxoem/schedae/compare/v1.0.3...v1.0.4",
+    "url": "https://github.com/maxoem/schedae/releases/tag/v1.0.4",
+    "isPrerelease": false
+  },
+  {
     "id": 416345862,
     "tag": "v1.0.3",
     "name": "v1.0.3",

@@ -194,42 +194,225 @@ function toFiniteNumber(value: unknown, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
-function buildModelFromFieldCount(
+export type NoteTypeMode = "unified" | "per_schema";
+
+export interface CreateApkgModelOptions {
+  /**
+   * Controls how fields and Note Type schemas are structured in the exported .apkg:
+   * - "unified" (default): Always includes [Front, Back, Topic] on the base Note Type
+   *   with a deterministic model ID so plain decks and topic-badge decks share and
+   *   update one Note Type in Anki. Extra custom fields beyond Topic get their own
+   *   deterministic variant.
+   * - "per_schema": Only includes fields actually present on the exported cards,
+   *   giving each unique field set its own deterministic model ID and descriptive name.
+   */
+  noteTypeMode?: NoteTypeMode;
+  /** Optional custom base Note Type name overriding the selected template's default name. */
+  customNoteTypeName?: string;
+}
+
+export interface ResolvedApkgModelConfig {
+  modelId: number;
+  noteTypeName: string;
+  cardTypeName: string;
+  customFieldNames: string[];
+  fieldNames: string[];
+}
+
+/**
+ * Computes a stable, positive 13-digit model ID from a schema key so repeated exports
+ * of the same template and field schema reuse/update the same Note Type in Anki.
+ */
+export function computeDeterministicModelId(schemaKey: string): number {
+  let h1 = 0x811c9dc5;
+  let h2 = 0x9e3779b9;
+  for (let i = 0; i < schemaKey.length; i++) {
+    const code = schemaKey.charCodeAt(i);
+    h1 ^= code;
+    h1 = Math.imul(h1, 0x01000193);
+    h2 ^= code + i;
+    h2 = Math.imul(h2, 0x85ebca6b);
+  }
+  const hi = (h1 >>> 0) % 8_000_000;
+  const lo = (h2 >>> 0) % 1_000_000;
+  return 1_000_000_000_000 + hi * 1_000_000 + lo;
+}
+
+function resolveNoteTypeNames(
+  templateId: CardTemplateId,
+  customFieldNames: string[],
+  noteTypeMode: NoteTypeMode,
+  customNoteTypeName?: string,
+): { noteTypeName: string; cardTypeName: string; template: (typeof CARD_TEMPLATES)[CardTemplateId] } {
+  const template = CARD_TEMPLATES[templateId] || CARD_TEMPLATES.default;
+  const baseName = customNoteTypeName?.trim() || template.noteTypeName;
+  const cardTypeName = template.cardTypeName;
+
+  if (noteTypeMode === "unified") {
+    const extraFields = customFieldNames.filter((n) => n.toLowerCase() !== "topic");
+    const noteTypeName = extraFields.length === 0 ? baseName : `${baseName} (+${extraFields.join(", ")})`;
+    return { noteTypeName, cardTypeName, template };
+  }
+
+  const noteTypeName = customFieldNames.length === 0 ? baseName : `${baseName} (${customFieldNames.join(", ")})`;
+  return { noteTypeName, cardTypeName, template };
+}
+
+/**
+ * Resolves the deterministic Anki model ID, Note Type name, Card Type name, and ordered
+ * field names for a set of cards and template configuration.
+ */
+export function resolveApkgModelConfig(
+  cards: FlashCard[],
+  templateId: CardTemplateId = "default",
+  options?: CreateApkgModelOptions,
+): ResolvedApkgModelConfig {
+  const mode: NoteTypeMode = options?.noteTypeMode ?? "unified";
+
+  let topicFieldName: string | null = null;
+  const extraFields: string[] = [];
+  const seenLower = new Set<string>();
+
+  for (const card of cards) {
+    if (!card.customFields) continue;
+    for (const rawKey of Object.keys(card.customFields)) {
+      const key = rawKey.trim();
+      if (!key) continue;
+      const lower = key.toLowerCase();
+      if (lower === "front" || lower === "back" || seenLower.has(lower)) continue;
+      seenLower.add(lower);
+      if (lower === "topic") {
+        topicFieldName = key;
+      } else {
+        extraFields.push(key);
+      }
+    }
+  }
+
+  extraFields.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+
+  const customFieldNames: string[] = [];
+  if (mode === "unified") {
+    customFieldNames.push(topicFieldName ?? "Topic");
+  } else if (topicFieldName) {
+    customFieldNames.push(topicFieldName);
+  }
+  customFieldNames.push(...extraFields);
+
+  const fieldNames = ["Front", "Back", ...customFieldNames];
+  const { noteTypeName, cardTypeName, template } = resolveNoteTypeNames(
+    templateId,
+    customFieldNames,
+    mode,
+    options?.customNoteTypeName,
+  );
+  const schemaKey = `schedae:v1:${template.id}:${noteTypeName}:${fieldNames.join("\x1f")}`;
+  const modelId = computeDeterministicModelId(schemaKey);
+
+  return {
+    modelId,
+    noteTypeName,
+    cardTypeName,
+    customFieldNames,
+    fieldNames,
+  };
+}
+
+function getCustomFieldValue(customFields: Record<string, string> | undefined, fieldName: string): string {
+  if (!customFields) return "";
+  if (fieldName in customFields) return customFields[fieldName] || "";
+  const lower = fieldName.toLowerCase();
+  for (const [k, v] of Object.entries(customFields)) {
+    if (k.trim().toLowerCase() === lower) return v || "";
+  }
+  return "";
+}
+
+function buildTemplateQfmtAfmt(
+  templateId: CardTemplateId,
+  frontFieldName: string,
+  backFieldName: string,
+  customFieldNames: string[],
+): { qfmt: string; afmt: string } {
+  const selectedTemplate = CARD_TEMPLATES[templateId] || CARD_TEMPLATES.default;
+
+  let afmt = selectedTemplate.afmt.replaceAll("{{Back}}", `{{${backFieldName}}}`);
+  for (const name of customFieldNames) {
+    // Topic is elevated to a first-class badge on the front, not rendered as generic back footer
+    if (name.toLowerCase() === "topic") continue;
+
+    const safeName = name.toLowerCase().replace(/[^a-z0-9]/g, "-");
+    if (templateId === "markdown_basic") {
+      afmt += `\n{{#${name}}}<div class="custom-field custom-field-${safeName}"><hr><b>${name}:</b><div class="md-custom-field md-field"><pre>{{${name}}}</pre></div></div>{{/${name}}}`;
+    } else {
+      afmt += `\n{{#${name}}}<div class="custom-field custom-field-${safeName}"><hr><b>${name}:</b><br>{{${name}}}</div>{{/${name}}}`;
+    }
+  }
+
+  let qfmt = selectedTemplate.qfmt.replaceAll("{{Front}}", `{{${frontFieldName}}}`);
+  const topicFieldName = customFieldNames.find((n) => n.toLowerCase() === "topic");
+  if (topicFieldName) {
+    qfmt = `{{#${topicFieldName}}}<div class="card-topic-badge">{{${topicFieldName}}}</div>{{/${topicFieldName}}}\n` + qfmt;
+  }
+
+  return { qfmt, afmt };
+}
+
+function buildModelFromFields(
   modelId: number,
   deckId: number,
-  fieldCount: number,
+  fieldNames: string[],
   templateCount: number,
   timestamp: number,
   templateId: CardTemplateId,
+  modelNameOverride?: string,
+  sourceTemplates?: Array<{ name?: string; qfmt?: string; afmt?: string; ord?: number }>,
+  sourceCss?: string,
 ) {
   const selectedTemplate = CARD_TEMPLATES[templateId] || CARD_TEMPLATES.default;
-  const safeFieldCount = Math.max(2, fieldCount);
-  const safeTemplateCount = Math.max(1, templateCount);
+  const normalizedFields = fieldNames.length >= 2
+    ? fieldNames
+    : [fieldNames[0] || "Front", fieldNames[1] || "Back"];
+  const safeTemplateCount = Math.max(1, templateCount, sourceTemplates?.length ?? 0);
+  const { qfmt: defaultQfmt, afmt: defaultAfmt } = buildTemplateQfmtAfmt(
+    templateId,
+    normalizedFields[0],
+    normalizedFields[1],
+    normalizedFields.slice(2),
+  );
 
-  const flds = Array.from({ length: safeFieldCount }, (_, idx) => ({
-    name: idx === 0 ? "Front" : idx === 1 ? "Back" : `Field ${idx + 1}`,
+  const flds = normalizedFields.map((name, idx) => ({
+    name,
     ord: idx,
     font: "Arial",
     media: [],
     rtl: false,
-    size: 20,
+    size: idx < 2 ? 20 : 16,
     sticky: false,
   }));
 
-  const tmpls = Array.from({ length: safeTemplateCount }, (_, idx) => ({
-    name: `Card ${idx + 1}`,
-    qfmt: selectedTemplate.qfmt,
-    afmt: selectedTemplate.afmt,
-    bafmt: "",
-    bqfmt: "",
-    bfont: "",
-    bsize: 0,
-    did: null,
-    ord: idx,
-  }));
+  const tmpls = Array.from({ length: safeTemplateCount }, (_, idx) => {
+    const src = sourceTemplates?.[idx];
+    return {
+      name: idx === 0
+        ? (templateId !== "default" ? selectedTemplate.cardTypeName : (src?.name || `Card ${idx + 1}`))
+        : (src?.name || `Card ${idx + 1}`),
+      qfmt: src?.qfmt || defaultQfmt,
+      afmt: src?.afmt || defaultAfmt,
+      bafmt: "",
+      bqfmt: "",
+      bfont: "",
+      bsize: 0,
+      did: null,
+      ord: idx,
+    };
+  });
+
+  const fallbackCustom = normalizedFields.slice(2);
+  const { noteTypeName } = resolveNoteTypeNames(templateId, fallbackCustom, "per_schema");
 
   return {
-    css: selectedTemplate.css,
+    css: sourceCss && templateId === "default" ? sourceCss : selectedTemplate.css,
     did: deckId,
     flds,
     id: String(modelId),
@@ -238,7 +421,7 @@ function buildModelFromFieldCount(
       "\\\\documentclass[12pt]{article}\\special{papersize=3in,5in}\\\\usepackage[utf8]{inputenc}\\\\usepackage{amssymb,amsmath}\\\\pagestyle{empty}\\\\setlength{\\\\parindent}{0in}\\\\begin{document}",
     latexsvg: false,
     mod: timestamp,
-    name: `Basic-${modelId}`,
+    name: modelNameOverride || noteTypeName,
     req: [[0, "all", [0]]],
     sortf: 0,
     tags: [],
@@ -247,6 +430,30 @@ function buildModelFromFieldCount(
     usn: -1,
     vers: [],
   };
+}
+
+function buildModelFromFieldCount(
+  modelId: number,
+  deckId: number,
+  fieldCount: number,
+  templateCount: number,
+  timestamp: number,
+  templateId: CardTemplateId,
+  modelNameOverride?: string,
+) {
+  const safeFieldCount = Math.max(2, fieldCount);
+  const fieldNames = Array.from({ length: safeFieldCount }, (_, idx) =>
+    idx === 0 ? "Front" : idx === 1 ? "Back" : `Field ${idx + 1}`,
+  );
+  return buildModelFromFields(
+    modelId,
+    deckId,
+    fieldNames,
+    templateCount,
+    timestamp,
+    templateId,
+    modelNameOverride,
+  );
 }
 
 /**
@@ -327,12 +534,13 @@ export function formatMarkdownForAnki(content: string): string {
   return str;
 }
 
-export interface CreateApkgOptions {
+export interface CreateApkgOptions extends CreateApkgModelOptions {
   /**
-   * When true, generates fresh GUIDs and IDs for notes, cards, models, and decks.
+   * When true, generates fresh GUIDs and IDs for notes, cards, and decks.
    * This guarantees that Anki treats the package as a brand-new independent deck,
-   * avoiding duplicate card skips, note conflicts, and notetype schema rejections,
-   * while preserving 100% of scheduling history, review logs, and FSRS states.
+   * avoiding duplicate card skips and note conflicts, while using deterministic
+   * Note Type IDs so Anki reuses/updates matching Note Types rather than
+   * creating duplicates, and preserving 100% of scheduling history and FSRS states.
    */
   regenerateIds?: boolean;
 }
@@ -453,8 +661,8 @@ export async function createApkgFromAnkiJson(
   }
 
   const decksToCreate = new Map<number, string>();
-  const modelFieldCount = new Map<number, number>();
-  const modelTemplateCount = new Map<number, number>();
+  const origModelFieldCount = new Map<number, number>();
+  const origModelTemplateCount = new Map<number, number>();
 
   for (const entry of noteEntries) {
     const targetDid = getDeckId(entry.deckId);
@@ -477,7 +685,6 @@ export async function createApkgFromAnkiJson(
     }
 
     const origMid = toFiniteNumber(entry.note?.mid, fallbackModelId);
-    const targetMid = getModelId(origMid);
     const fieldCount = typeof entry.note?.flds === "string" && entry.note.flds.length
       ? entry.note.flds.split("\x1f").length
       : 2;
@@ -486,12 +693,11 @@ export async function createApkgFromAnkiJson(
     }, 0);
     const templateCount = maxOrd + 1;
 
-    modelFieldCount.set(targetMid, Math.max(modelFieldCount.get(targetMid) ?? 0, fieldCount));
-    modelTemplateCount.set(targetMid, Math.max(modelTemplateCount.get(targetMid) ?? 1, templateCount));
+    origModelFieldCount.set(origMid, Math.max(origModelFieldCount.get(origMid) ?? 0, fieldCount));
+    origModelTemplateCount.set(origMid, Math.max(origModelTemplateCount.get(origMid) ?? 1, templateCount));
   }
 
   const firstDeckId = decksToCreate.keys().next().value ?? fallbackDeckId;
-  const firstModelId = modelFieldCount.keys().next().value ?? fallbackModelId;
 
   for (const [did, name] of decksToCreate.entries()) {
     decksObj[String(did)] = {
@@ -512,48 +718,139 @@ export async function createApkgFromAnkiJson(
     };
   }
 
-  // 1. Preserve original models from source deck if available (preserves exact field names,
-  // template structures, IDs, and prevents Anki from reporting "Notetype changed / conflict").
-  if (ankiJson?.models && typeof ankiJson.models === "object") {
-    for (const [midStr, rawModel] of Object.entries(ankiJson.models as Record<string, any>)) {
-      if (rawModel && Array.isArray(rawModel.flds) && rawModel.flds.length > 0) {
-        const origMid = toFiniteNumber(midStr, fallbackModelId);
-        const targetMid = getModelId(origMid);
-        const clonedModel = JSON.parse(JSON.stringify(rawModel));
-        clonedModel.id = targetMid;
-        clonedModel.mod = timestamp;
-        if (regenerateIds && typeof clonedModel.name === "string" && !clonedModel.name.includes("(Remastered)")) {
-          clonedModel.name = `${clonedModel.name} (Remastered)`;
-        }
+  interface SourceAnkiModelField {
+    name?: string;
+    ord?: number;
+  }
+  interface SourceAnkiModelTemplate {
+    name?: string;
+    qfmt?: string;
+    afmt?: string;
+    ord?: number;
+  }
+  interface SourceAnkiModel {
+    id?: string | number;
+    mod?: number;
+    name?: string;
+    css?: string;
+    flds?: SourceAnkiModelField[];
+    tmpls?: SourceAnkiModelTemplate[];
+    fieldNames?: string[];
+    templates?: SourceAnkiModelTemplate[];
+    [key: string]: unknown;
+  }
 
-        // If a specific template style was requested, apply CSS & template formatting
-        // while preserving exact field schema
-        if (templateId && templateId !== "default" && CARD_TEMPLATES[templateId]) {
-          const tpl = CARD_TEMPLATES[templateId];
-          clonedModel.css = tpl.css;
-          if (Array.isArray(clonedModel.tmpls) && clonedModel.tmpls.length > 0) {
-            clonedModel.tmpls[0].qfmt = tpl.qfmt;
-            clonedModel.tmpls[0].afmt = tpl.afmt;
-          }
-        }
-        modelsObj[String(targetMid)] = clonedModel;
+  // Normalize source models (handles both legacy col.models and modern loadModelsNew metadata)
+  const sourceModelsByOrigMid = new Map<number, SourceAnkiModel>();
+  if (ankiJson?.models && typeof ankiJson.models === "object") {
+    for (const [midStr, rawModel] of Object.entries(ankiJson.models as Record<string, SourceAnkiModel>)) {
+      const origMid = toFiniteNumber(midStr, fallbackModelId);
+      if (rawModel && Array.isArray(rawModel.flds) && rawModel.flds.length > 0) {
+        sourceModelsByOrigMid.set(origMid, JSON.parse(JSON.stringify(rawModel)) as SourceAnkiModel);
+      } else if (rawModel && Array.isArray(rawModel.fieldNames) && rawModel.fieldNames.length > 0) {
+        const normalized = buildModelFromFields(
+          origMid,
+          firstDeckId,
+          rawModel.fieldNames,
+          origModelTemplateCount.get(origMid) ?? (Array.isArray(rawModel.templates) ? rawModel.templates.length : 1),
+          timestamp,
+          "default",
+          typeof rawModel.name === "string" && rawModel.name.trim() ? rawModel.name.trim() : undefined,
+          Array.isArray(rawModel.templates) ? rawModel.templates : undefined,
+          typeof rawModel.css === "string" ? rawModel.css : undefined,
+        );
+        sourceModelsByOrigMid.set(origMid, normalized);
       }
     }
   }
 
-  // 2. For any models not present in source deck, build fallback models
-  for (const [targetMid, count] of modelFieldCount.entries()) {
-    if (!modelsObj[String(targetMid)]) {
+  const resolveRemasteredModelIdentity = (origMid: number, fieldNames: string[], origName?: string) => {
+    const selectedTemplate = CARD_TEMPLATES[templateId] || CARD_TEMPLATES.default;
+    if (!regenerateIds) {
+      return {
+        targetMid: origMid,
+        modelName: origName || resolveNoteTypeNames(templateId, fieldNames.slice(2), "per_schema", options?.customNoteTypeName).noteTypeName,
+      };
+    }
+
+    let modelName: string;
+    if (templateId !== "default" || options?.customNoteTypeName?.trim()) {
+      modelName = resolveNoteTypeNames(templateId, fieldNames.slice(2), "per_schema", options?.customNoteTypeName).noteTypeName;
+    } else if (origName && origName.trim() && !/^basic(-\d+)?$/i.test(origName.trim())) {
+      modelName = origName.includes("(Remastered)") ? origName : `${origName} (Remastered)`;
+    } else {
+      modelName = resolveNoteTypeNames("default", fieldNames.slice(2), "per_schema").noteTypeName;
+    }
+
+    const schemaKey = `schedae:v1:${selectedTemplate.id}:${modelName}:${fieldNames.join("\x1f")}`;
+    return {
+      targetMid: computeDeterministicModelId(schemaKey),
+      modelName,
+    };
+  };
+
+  // Pre-resolve origMid -> targetMid consistently across modelsObj, conf.curModel, and notes.mid
+  const allOrigMids = new Set<number>([
+    ...origModelFieldCount.keys(),
+    ...sourceModelsByOrigMid.keys(),
+  ]);
+
+  for (const origMid of allOrigMids) {
+    const srcModel = sourceModelsByOrigMid.get(origMid);
+    const fieldNames: string[] = srcModel?.flds?.length
+      ? [...srcModel.flds].sort((a, b) => (a.ord ?? 0) - (b.ord ?? 0)).map((f) => String(f.name || "Field"))
+      : Array.from({ length: Math.max(2, origModelFieldCount.get(origMid) ?? 2) }, (_, idx) =>
+          idx === 0 ? "Front" : idx === 1 ? "Back" : `Field ${idx + 1}`,
+        );
+
+    const { targetMid, modelName } = resolveRemasteredModelIdentity(
+      origMid,
+      fieldNames,
+      typeof srcModel?.name === "string" ? srcModel.name : undefined,
+    );
+    modelIdMap.set(origMid, targetMid);
+
+    if (modelsObj[String(targetMid)]) continue;
+
+    if (srcModel) {
+      const clonedModel = JSON.parse(JSON.stringify(srcModel));
+      clonedModel.id = targetMid;
+      clonedModel.mod = timestamp;
+      clonedModel.name = modelName;
+
+      // Apply requested template CSS & front/back markup while preserving exact field schema
+      if (templateId && templateId !== "default" && CARD_TEMPLATES[templateId]) {
+        const tpl = CARD_TEMPLATES[templateId];
+        const { qfmt, afmt } = buildTemplateQfmtAfmt(
+          templateId,
+          fieldNames[0] || "Front",
+          fieldNames[1] || "Back",
+          fieldNames.slice(2),
+        );
+
+        clonedModel.css = tpl.css;
+        if (Array.isArray(clonedModel.tmpls) && clonedModel.tmpls.length > 0) {
+          clonedModel.tmpls[0].name = tpl.cardTypeName;
+          clonedModel.tmpls[0].qfmt = qfmt;
+          clonedModel.tmpls[0].afmt = afmt;
+        }
+      }
+      modelsObj[String(targetMid)] = clonedModel;
+    } else {
       modelsObj[String(targetMid)] = buildModelFromFieldCount(
         targetMid,
         firstDeckId,
-        count,
-        modelTemplateCount.get(targetMid) ?? 1,
+        origModelFieldCount.get(origMid) ?? 2,
+        origModelTemplateCount.get(origMid) ?? 1,
         timestamp,
         templateId,
+        modelName,
       );
     }
   }
+
+  const firstOrigMid = origModelFieldCount.keys().next().value;
+  const firstModelId = firstOrigMid !== undefined ? getModelId(firstOrigMid) : fallbackModelId;
 
   confObj.activeDecks = [firstDeckId];
   confObj.curDeck = firstDeckId;
@@ -736,7 +1033,13 @@ export async function createApkgFromAnkiJson(
   return zip.generateAsync({ type: "blob" });
 }
 
-export async function createApkg(cards: FlashCard[], deckName: string, templateId: CardTemplateId = "default", customCss?: string): Promise<Blob> {
+export async function createApkg(
+  cards: FlashCard[],
+  deckName: string,
+  templateId: CardTemplateId = "default",
+  customCss?: string,
+  options?: CreateApkgModelOptions,
+): Promise<Blob> {
   const SQL = await initSqlJsInstance();
   const db = new SQL.Database();
 
@@ -745,7 +1048,8 @@ export async function createApkg(cards: FlashCard[], deckName: string, templateI
 
   const timestamp = Math.floor(Date.now() / 1000);
   const deckId = new Date().getTime();
-  const modelId = deckId + 1;
+  const resolvedModel = resolveApkgModelConfig(cards, templateId, options);
+  const modelId = resolvedModel.modelId;
 
   const deckJson = {
     collapsed: false,
@@ -764,19 +1068,7 @@ export async function createApkg(cards: FlashCard[], deckName: string, templateI
     usn: -1
   };
 
-  const customFieldNames: string[] = [];
-  const seenCustomKeys = new Set<string>();
-  for (const card of cards) {
-    if (card.customFields) {
-      for (const key of Object.keys(card.customFields)) {
-        if (!seenCustomKeys.has(key)) {
-          seenCustomKeys.add(key);
-          customFieldNames.push(key);
-        }
-      }
-    }
-  }
-
+  const customFieldNames = resolvedModel.customFieldNames;
   const selectedTemplate = CARD_TEMPLATES[templateId] || CARD_TEMPLATES.default;
 
   const fldsConfig = [
@@ -793,24 +1085,12 @@ export async function createApkg(cards: FlashCard[], deckName: string, templateI
     })),
   ];
 
-  let cardAfmt = selectedTemplate.afmt;
-  for (const name of customFieldNames) {
-    // Topic is elevated to a first-class badge on the front, not rendered as generic back footer
-    if (name.toLowerCase() === "topic") continue;
-
-    const safeName = name.toLowerCase().replace(/[^a-z0-9]/g, "-");
-    if (templateId === "markdown_basic") {
-      cardAfmt += `\n{{#${name}}}<div class="custom-field custom-field-${safeName}"><hr><b>${name}:</b><div class="md-custom-field md-field"><pre>{{${name}}}</pre></div></div>{{/${name}}}`;
-    } else {
-      cardAfmt += `\n{{#${name}}}<div class="custom-field custom-field-${safeName}"><hr><b>${name}:</b><br>{{${name}}}</div>{{/${name}}}`;
-    }
-  }
-
-  let cardQfmt = selectedTemplate.qfmt;
-  const topicFieldName = customFieldNames.find((n) => n.toLowerCase() === "topic");
-  if (topicFieldName) {
-    cardQfmt = `{{#${topicFieldName}}}<div class="card-topic-badge">{{${topicFieldName}}}</div>{{/${topicFieldName}}}\n` + cardQfmt;
-  }
+  const { qfmt: cardQfmt, afmt: cardAfmt } = buildTemplateQfmtAfmt(
+    templateId,
+    "Front",
+    "Back",
+    customFieldNames,
+  );
 
   const modelJson = {
     css: customCss || selectedTemplate.css,
@@ -821,7 +1101,7 @@ export async function createApkg(cards: FlashCard[], deckName: string, templateI
     latexPre: "\\\\documentclass[12pt]{article}\\special{papersize=3in,5in}\\\\usepackage[utf8]{inputenc}\\\\usepackage{amssymb,amsmath}\\\\pagestyle{empty}\\\\setlength{\\\\parindent}{0in}\\\\begin{document}",
     latexsvg: false,
     mod: timestamp,
-    name: "Basic",
+    name: resolvedModel.noteTypeName,
     req: [
       [0, "all", [0]]
     ],
@@ -829,7 +1109,7 @@ export async function createApkg(cards: FlashCard[], deckName: string, templateI
     tags: [],
     tmpls: [
       {
-        name: "Card 1",
+        name: resolvedModel.cardTypeName,
         qfmt: cardQfmt,
         afmt: cardAfmt,
         bafmt: "",
@@ -845,14 +1125,19 @@ export async function createApkg(cards: FlashCard[], deckName: string, templateI
     vers: []
   };
 
-  const colRes = db.exec("SELECT decks, models FROM col");
+  const colRes = db.exec("SELECT decks, models, conf FROM col");
   const decksObj = JSON.parse(colRes[0].values[0][0] as string);
   const modelsObj = JSON.parse(colRes[0].values[0][1] as string);
+  const confObj = JSON.parse(colRes[0].values[0][2] as string);
 
   decksObj[String(deckId)] = deckJson;
   modelsObj[String(modelId)] = modelJson;
+  confObj.activeDecks = [deckId];
+  confObj.curDeck = deckId;
+  confObj.curModel = String(modelId);
 
-  db.exec("UPDATE col SET decks = ?, models = ?", [
+  db.exec("UPDATE col SET conf = ?, decks = ?, models = ?", [
+    JSON.stringify(confObj),
     JSON.stringify(decksObj),
     JSON.stringify(modelsObj)
   ]);
@@ -864,7 +1149,7 @@ export async function createApkg(cards: FlashCard[], deckName: string, templateI
     const frontHTML = formatMarkdownForAnki(card.front);
     const backHTML = formatMarkdownForAnki(card.back || "");
     const extraFlds = customFieldNames.map((name) =>
-      formatMarkdownForAnki(card.customFields?.[name] || "")
+      formatMarkdownForAnki(getCustomFieldValue(card.customFields, name))
     );
     const flds = [frontHTML, backHTML, ...extraFlds].join("\x1f");
     
