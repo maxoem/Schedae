@@ -1,5 +1,6 @@
 import type { ExtractorOptions, ExtractorResult, ExtractorStrategy } from "../types";
 import { FormatDetector } from "../heuristics/formatDetector";
+import { isBareFieldLabel } from "../keywords";
 import { JsonExtractor } from "./jsonExtractor";
 import { MarkdownSectionsExtractor } from "./markdownSectionsExtractor";
 import { KeyValueExtractor } from "./keyValueExtractor";
@@ -100,8 +101,10 @@ export class AutoDetectExtractor implements ExtractorStrategy {
       if (extractor.canExtract(text)) {
         const res = extractor.extract(text, options);
         if (res.cards.length > 0) {
-          // Viability guard: a deck extraction is viable if cards have non-empty question and answer content
-          const isViable = res.cards.some((c) => c.front.trim().length > 0 && c.back.trim().length > 0);
+          // Viability guard: cards must have non-empty content and not consist solely of bare field labels
+          const isViable =
+            res.cards.some((c) => c.front.trim().length > 0 && c.back.trim().length > 0) &&
+            !res.cards.some((c) => isBareFieldLabel(c.front));
           if (isViable) {
             return res;
           }

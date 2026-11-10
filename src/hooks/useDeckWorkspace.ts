@@ -104,12 +104,14 @@ export function useDeckWorkspace(aiStencil?: Stencil | null) {
 
   const [splitSettings, setSplitSettingsState] = useState<SplitSettings>(() => {
     try {
-      const saved = localStorage.getItem(STORAGE_KEYS.SPLIT_SETTINGS);
-      if (saved) return JSON.parse(saved);
       const rule = localStorage.getItem(STORAGE_KEYS.PARSER_RULE);
+      if (rule === "custom") {
+        const saved = localStorage.getItem(STORAGE_KEYS.SPLIT_SETTINGS);
+        if (saved) return JSON.parse(saved);
+      }
       if (rule === "headings") return PREDEFINED_EXTRACTION_SETS[0];
       if (rule === "bold-italic") return PREDEFINED_EXTRACTION_SETS[1];
-      return PREDEFINED_EXTRACTION_SETS[2];
+      return DEFAULT_SPLIT_SETTINGS;
     } catch {
       return DEFAULT_SPLIT_SETTINGS;
     }
@@ -124,11 +126,25 @@ export function useDeckWorkspace(aiStencil?: Stencil | null) {
   const [exportError, setExportError] = useState<string | null>(null);
   const [isSheetOpen, setIsSheetOpen] = useState(false);
 
+  const buildParseOptions = useCallback(
+    () => ({
+      strictJson: validateJson,
+      splitSettings: parserRule === "auto" ? undefined : splitSettings,
+      extractorId: parserRule === "custom" ? "regex" : undefined,
+      aiStencil,
+      normalizeModel: selectedModel,
+      parserMode,
+      extractTopicBadges,
+    }),
+    [validateJson, parserRule, splitSettings, aiStencil, selectedModel, parserMode, extractTopicBadges]
+  );
+
   // Parse result for the current sourceText draft
   const [draftParseResult, setDraftParseResult] = useState<DeckParseResult>(() =>
     DeckParserService.parse(sourceText, {
       strictJson: validateJson,
-      splitSettings,
+      splitSettings: parserRule === "auto" ? undefined : splitSettings,
+      extractorId: parserRule === "custom" ? "regex" : undefined,
       aiStencil,
       normalizeModel: selectedModel,
       parserMode,
@@ -145,14 +161,7 @@ export function useDeckWorkspace(aiStencil?: Stencil | null) {
     if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
 
     debounceTimerRef.current = setTimeout(() => {
-      const res = DeckParserService.parse(sourceText, {
-        strictJson: validateJson,
-        splitSettings,
-        aiStencil,
-        normalizeModel: selectedModel,
-        parserMode,
-        extractTopicBadges,
-      });
+      const res = DeckParserService.parse(sourceText, buildParseOptions());
 
       setDraftParseResult(res);
       setDraftCards(res.cards);
@@ -168,7 +177,7 @@ export function useDeckWorkspace(aiStencil?: Stencil | null) {
     return () => {
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
     };
-  }, [sourceText, validateJson, splitSettings, aiStencil, selectedModel, parserMode, deckName, extractTopicBadges]);
+  }, [sourceText, buildParseOptions, deckName]);
 
   // Sync state to localStorage
   useEffect(() => {
@@ -210,8 +219,8 @@ export function useDeckWorkspace(aiStencil?: Stencil | null) {
       setSplitSettingsState(PREDEFINED_EXTRACTION_SETS[0]);
     } else if (rule === "bold-italic") {
       setSplitSettingsState(PREDEFINED_EXTRACTION_SETS[1]);
-    } else if (rule === "generic") {
-      setSplitSettingsState(PREDEFINED_EXTRACTION_SETS[2]);
+    } else if (rule === "generic" || rule === "auto") {
+      setSplitSettingsState(DEFAULT_SPLIT_SETTINGS);
     } else if (rule === "custom") {
       setSplitSettingsState((prev) => ({ ...prev, id: "custom", name: "Custom" }));
     }
@@ -261,8 +270,8 @@ export function useDeckWorkspace(aiStencil?: Stencil | null) {
 
   // Highlights for SyntaxEditor (including custom fields)
   const highlightPatterns = useMemo<HighlightMarkerPattern[]>(
-    () => buildHighlightPatterns(splitSettings, customFieldNames),
-    [splitSettings, customFieldNames]
+    () => buildHighlightPatterns(parserRule === "auto" ? DEFAULT_SPLIT_SETTINGS : splitSettings, customFieldNames),
+    [parserRule, splitSettings, customFieldNames]
   );
 
   // Batch management: Add current sourceText as a new batch and clear editor

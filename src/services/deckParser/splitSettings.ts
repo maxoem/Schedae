@@ -3,6 +3,11 @@ import remarkParse from "remark-parse";
 import { toString } from "mdast-util-to-string";
 import { dedentText } from "@/lib/utils";
 import type { FlashCard } from "@/converters/types";
+import {
+  PARSER_KEYWORDS,
+  HEADING_CARD_HEADER_REGEX,
+  isCardKeyword,
+} from "./keywords";
 
 export type MarkdownNode = {
   type: string;
@@ -25,13 +30,23 @@ export interface SplitSettings {
   ignoreMarkerBrackets: boolean;
 }
 
+export interface RegexExtractionOutput {
+  cards: FlashCard[];
+  /** Cards where at least one configured question or answer marker matched */
+  markerMatchedCards: number;
+  /** Cards extracted solely via positional fallback (no Q/A marker matched) */
+  positionalFallbackCards: number;
+}
+
 export const PREDEFINED_EXTRACTION_SETS: SplitSettings[] = [
   {
     id: "headings",
     name: "Markdown Headings",
-    cardSeparators: "### Karte, ## Karte, # Karte, ### Card, ## Card, # Card",
-    questionMarkers: "### Frage, ## Frage, # Frage, ### Question, ## Question, # Question",
-    answerMarkers: "### Antwort, ## Antwort, # Antwort, ### Answer, ## Answer, # Answer",
+    cardSeparators: "### Karte, ## Karte, # Karte, ### Card, ## Card, # Card, ---, ***",
+    questionMarkers:
+      "### Frage, ## Frage, # Frage, ### Question, ## Question, # Question, ### Vorderseite, ## Vorderseite, # Vorderseite, ### Front, ## Front, # Front",
+    answerMarkers:
+      "### Antwort, ## Antwort, # Antwort, ### Answer, ## Answer, # Answer, ### Rückseite, ## Rückseite, # Rückseite, ### Back, ## Back, # Back",
     includeCardSeparatorMarker: false,
     includeQuestionMarker: false,
     includeAnswerMarker: false,
@@ -40,9 +55,11 @@ export const PREDEFINED_EXTRACTION_SETS: SplitSettings[] = [
   {
     id: "bold-italic",
     name: "Bold and Italic",
-    cardSeparators: "**Karte**, **Card**",
-    questionMarkers: "*Frage:*, **Frage:**, *Question:*, **Question:**",
-    answerMarkers: "*Antwort:*, **Antwort:**, *Answer:*, **Answer:**",
+    cardSeparators: "**Karte**, **Card**, ### Karte, ### Card, ---, ***",
+    questionMarkers:
+      "*Frage:*, **Frage:**, *Question:*, **Question:**, *Vorderseite:*, **Vorderseite:**, *Front:*, **Front:**",
+    answerMarkers:
+      "*Antwort:*, **Antwort:**, *Answer:*, **Answer:**, *Rückseite:*, **Rückseite:**, *Back:*, **Back:**",
     includeCardSeparatorMarker: false,
     includeQuestionMarker: false,
     includeAnswerMarker: false,
@@ -52,14 +69,30 @@ export const PREDEFINED_EXTRACTION_SETS: SplitSettings[] = [
     id: "generic",
     name: "Generic (Plain Text)",
     cardSeparators: "Karte, Card, ***, ---",
-    questionMarkers: "Frage:, Question:, Q:, Front:, Vorderseite:",
-    answerMarkers: "Antwort:, Answer:, A:, Back:, Rückseite:",
+    questionMarkers: "Frage:, Question:, Q:, Front:, Vorderseite:, Prompt:",
+    answerMarkers: "Antwort:, Answer:, A:, Back:, Rückseite:, Solution:, Lösung:",
     includeCardSeparatorMarker: false,
     includeQuestionMarker: false,
     includeAnswerMarker: false,
     ignoreMarkerBrackets: true,
   },
 ];
+
+/**
+ * Canonical multilingual SplitSettings derived from PARSER_KEYWORDS (Single Source of Truth).
+ * Used by Auto-Detect and as the comprehensive fallback in RegexExtractor.
+ */
+export const CANONICAL_SPLIT_SETTINGS: SplitSettings = {
+  id: "canonical",
+  name: "Canonical (All Languages)",
+  cardSeparators: [...PARSER_KEYWORDS.card, "***", "---"].join(", "),
+  questionMarkers: PARSER_KEYWORDS.front.map((k) => `${k}:`).join(", "),
+  answerMarkers: PARSER_KEYWORDS.back.map((k) => `${k}:`).join(", "),
+  includeCardSeparatorMarker: false,
+  includeQuestionMarker: false,
+  includeAnswerMarker: false,
+  ignoreMarkerBrackets: true,
+};
 
 export const DEFAULT_SPLIT_SETTINGS: SplitSettings = PREDEFINED_EXTRACTION_SETS[2];
 
@@ -72,12 +105,81 @@ function escapeRegExp(string: string) {
   return string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function normalizeVariants(value: string): string[] {
+  return Array.from(new Set([value, value.normalize("NFC"), value.normalize("NFD")]));
+}
+
 function normalizeSeparatorMarker(value: string) {
   return value
     .trim()
     .replace(/^\s*(?:#+\s+)?(?:\*\*|__)?/, "")
     .replace(/(?:\*\*|__)?\s*$/, "")
     .trim();
+}
+
+function escapeKeywordVariants(core: string): string {
+  const variants = normalizeVariants(core);
+  const pattern = variants
+    .map((v) => escapeRegExp(v) + (/[a-zA-Z\u00C0-\u017F]$/.test(v) ? "\\b" : ""))
+    .join("|");
+  return `(?:${pattern})`;
+}
+
+function buildMarkerAlternative(rawToken: string, bracketOpt: string): string {
+  const token = rawToken.trim();
+  if (!token) return "";
+
+  // 1. Explicit Markdown heading marker (e.g. "### Frage", "## **Rückseite:**")
+  const headingMatch = token.match(/^(#{1,6})\s+(.+)$/);
+  if (headingMatch) {
+    const hashes = headingMatch[1];
+    const rest = headingMatch[2].trim();
+    const core = rest
+      .replace(/^(\*\*|__|\*|_)(.+?)\1\s*:?$/, "$2")
+      .replace(/:$/, "")
+      .trim();
+    const corePattern = escapeKeywordVariants(core);
+    return `\\s*${hashes}\\s+(?:\\*{1,2}|_{1,2})?${corePattern}${bracketOpt}\\s*(?:\\*{1,2}|_{1,2})?\\s*:?\\s*(?:\\*{1,2}|_{1,2})?`;
+  }
+
+  // 2. Emphasis-wrapped marker (e.g. "**Vorderseite:**", "*Frage:*", "__Front__")
+  const emphMatch = token.match(/^(\*\*|__|\*|_)(.+?)\1\s*:?$/);
+  if (emphMatch) {
+    const delim = emphMatch[1];
+    const core = emphMatch[2].replace(/:$/, "").trim();
+    if (/[a-zA-Z0-9\u00C0-\u017F]/.test(core)) {
+      const corePattern = escapeKeywordVariants(core);
+      const emphOpen = delim.length === 2 ? "(?:\\*\\*|__)" : "(?:\\*{1,2}|_{1,2})";
+      return `\\s*(?:[*+-]\\s+)?(?:#+\\s+)?${emphOpen}${corePattern}${bracketOpt}\\s*(?:${emphOpen}\\s*:?|:?\\s*${emphOpen})`;
+    }
+  }
+
+  // 3. Plain / generic keyword marker (e.g. "Vorderseite:", "Q:", "Front")
+  const core = token.replace(/:$/, "").trim();
+  const corePattern = escapeKeywordVariants(core);
+
+  if (!/[a-zA-Z0-9\u00C0-\u017F]/.test(core)) {
+    return `\\s*(?:[*+-]\\s+)?(?:#+\\s+)?(?:\\*{1,2}|_{1,2})?${corePattern}${bracketOpt}\\s*(?:\\*{1,2}|_{1,2})?\\s*:?\\s*(?:\\*{1,2}|_{1,2})?`;
+  }
+
+  const structuralForm = `\\s*(?:[*+-]\\s+)?(?:#+\\s+(?:\\*{1,2}|_{1,2})?|(?:#+\\s+)?(?:\\*{1,2}|_{1,2}))${corePattern}${bracketOpt}\\s*(?:\\*{1,2}|_{1,2})?\\s*:?\\s*(?:\\*{1,2}|_{1,2})?`;
+  const colonForm = `\\s*(?:[*+-]\\s+)?${corePattern}${bracketOpt}\\s*:`;
+  if (core.length > 1) {
+    const standaloneForm = `\\s*(?:[*+-]\\s+)?${corePattern}${bracketOpt}(?=\\s*$)`;
+    return `(?:${structuralForm}|${colonForm}|${standaloneForm})`;
+  }
+  return `(?:${structuralForm}|${colonForm})`;
+}
+
+function buildMarkerRegex(markersCsv: string, bracketOpt: string): { regex: RegExp; parts: string[] } {
+  const rawTokens = markersCsv.split(",").map((s) => s.trim()).filter(Boolean);
+  const alternatives = rawTokens.map((t) => buildMarkerAlternative(t, bracketOpt)).filter(Boolean);
+  const parts = rawTokens.flatMap((s) => {
+    const base = s.replace(/:$/, "");
+    return normalizeVariants(base).map((v) => escapeRegExp(v) + (/[a-zA-Z\u00C0-\u017F]$/.test(v) ? "\\b" : ""));
+  });
+  const regexStr = alternatives.length > 0 ? `^(?:${alternatives.join("|")})\\s*(.*)$` : `(?!x)x`;
+  return { regex: new RegExp(regexStr, "im"), parts };
 }
 
 export function buildSplitRegexes(settings: SplitSettings) {
@@ -92,37 +194,21 @@ export function buildSplitRegexes(settings: SplitSettings) {
       return [`^\\s*(?:[*+-]\\s+)?(?:#+\\s+)?(?:\\*\\*|__)?${escapedExact}(?:\\*\\*|__)?\\s*$`];
     }
 
-    const variants = Array.from(new Set([marker, marker.normalize("NFC"), marker.normalize("NFD")]));
+    const variants = normalizeVariants(marker);
     return variants.map((v) => {
       const escapedMarker = escapeRegExp(v);
-      return `^\\s*(?:[*+-]\\s+)?(?:#+\\s+)?(?:\\*\\*|__)?${escapedMarker}(?:\\b|$)(?:[^\\n]*)?(?:\\*\\*|__)?\\s*$`;
+      const boundary = isCardKeyword(v)
+        ? `(?:\\s*[\\d.#:–-]|\\s*(?:\\*\\*|__)?\\s*$)`
+        : `(?:\\b|$)`;
+      return `^\\s*(?:[*+-]\\s+)?(?:#+\\s+)?(?:\\*\\*|__)?${escapedMarker}${boundary}(?:[^\\n]*)?(?:\\*\\*|__)?\\s*$`;
     });
   });
-  const blockRegex = blockPatterns.length > 0 ? new RegExp(blockPatterns.join("|"), "m") : /(?!x)x/;
+  const blockRegex = blockPatterns.length > 0 ? new RegExp(blockPatterns.join("|"), "im") : /(?!x)x/;
 
   const bracketOpt = settings.ignoreMarkerBrackets ? `\\s*(?:\\([^)]*\\)|\\[[^\\]]*\\])?` : ``;
 
-  const qParts = getParts(settings.questionMarkers).flatMap((s) => {
-    const base = s.replace(/:$/, "");
-    const variants = Array.from(new Set([base, base.normalize("NFC"), base.normalize("NFD")]));
-    return variants.map((v) => escapeRegExp(v) + (v.match(/[a-zA-Z\u00C0-\u017F]$/) ? "\\b" : ""));
-  });
-  const questionRegexStr =
-    qParts.length > 0
-      ? `^\\s*(?:[*+-]\\s+)?(?:#+\\s+)?(?:\\*\\*|__)?(?:${qParts.join("|")})${bracketOpt}\\s*(?:\\*\\*|__)?\\s*:?\\s*(?:\\*\\*|__)?\\s*(.*)$`
-      : `(?!x)x`;
-  const questionRegex = new RegExp(questionRegexStr, "im");
-
-  const aParts = getParts(settings.answerMarkers).flatMap((s) => {
-    const base = s.replace(/:$/, "");
-    const variants = Array.from(new Set([base, base.normalize("NFC"), base.normalize("NFD")]));
-    return variants.map((v) => escapeRegExp(v) + (v.match(/[a-zA-Z\u00C0-\u017F]$/) ? "\\b" : ""));
-  });
-  const answerRegexStr =
-    aParts.length > 0
-      ? `^\\s*(?:[*+-]\\s+)?(?:#+\\s+)?(?:\\*\\*|__)?(?:${aParts.join("|")})${bracketOpt}\\s*(?:\\*\\*|__)?\\s*:?\\s*(?:\\*\\*|__)?\\s*(.*)$`
-      : `(?!x)x`;
-  const answerRegex = new RegExp(answerRegexStr, "im");
+  const { regex: questionRegex, parts: qParts } = buildMarkerRegex(settings.questionMarkers, bracketOpt);
+  const { regex: answerRegex, parts: aParts } = buildMarkerRegex(settings.answerMarkers, bracketOpt);
 
   return { blockRegex, questionRegex, answerRegex, qParts, aParts, bParts };
 }
@@ -194,8 +280,10 @@ function removeMarkerLines(text: string, markerRegex: RegExp): string {
   return result.join("\n");
 }
 
-export function extractFlashcardsFromText(text: string, settings: SplitSettings): FlashCard[] {
+export function extractFlashcardsWithMeta(text: string, settings: SplitSettings): RegexExtractionOutput {
   const cards: FlashCard[] = [];
+  let markerMatchedCards = 0;
+  let positionalFallbackCards = 0;
   const { blockRegex, questionRegex, answerRegex, bParts } = buildSplitRegexes(settings);
 
   // 1. Pre-process to ensure structural markers are partitioned into their own block-level nodes
@@ -225,7 +313,9 @@ export function extractFlashcardsFromText(text: string, settings: SplitSettings)
       nodeText = toString(node as any);
     }
 
-    const isCardSeparator = blockRegex.test(nodeText) || (node.type === "heading" && /^###?\s*Karte/i.test(nodeText));
+    const isCardSeparator =
+      blockRegex.test(nodeText) ||
+      (node.type === "heading" && HEADING_CARD_HEADER_REGEX.test(nodeText));
     const isQuestion = questionRegex.test(nodeText);
     const isAnswer = answerRegex.test(nodeText);
 
@@ -288,6 +378,7 @@ export function extractFlashcardsFromText(text: string, settings: SplitSettings)
 
     let frontNodes: MarkdownNode[] = [];
     let backNodes: MarkdownNode[] = [];
+    const usedMarker = qIndex !== -1 || aIndex !== -1;
 
     if (qIndex !== -1 && aIndex !== -1) {
       if (qIndex < aIndex) {
@@ -347,12 +438,12 @@ export function extractFlashcardsFromText(text: string, settings: SplitSettings)
     }
 
     if (!settings.includeCardSeparatorMarker && bParts.length > 0) {
-      const variants = bParts.flatMap((s) => Array.from(new Set([s, s.normalize("NFC"), s.normalize("NFD")])));
+      const variants = bParts.flatMap((s) => normalizeVariants(s));
       const escapedBParts = variants.map((s) => escapeRegExp(s));
       const bPartsStr = escapedBParts.join("|");
       const cleanRegex = new RegExp(
         `^\\s*(?:[*+-]\\s+)?(?:#+\\s+)?(?:\\*\\*|__)?(?:${bPartsStr})\\s*(?:\\*\\*|__)?\\s*:?\\s*(?:\\*\\*|__)?\\s*`,
-        "m"
+        "im"
       );
       frontMd = frontMd.replace(cleanRegex, "").trim();
       backMd = backMd.replace(cleanRegex, "").trim();
@@ -363,8 +454,17 @@ export function extractFlashcardsFromText(text: string, settings: SplitSettings)
 
     if (frontMd && backMd) {
       cards.push({ front: frontMd, back: backMd });
+      if (usedMarker) {
+        markerMatchedCards++;
+      } else {
+        positionalFallbackCards++;
+      }
     }
   }
 
-  return cards;
+  return { cards, markerMatchedCards, positionalFallbackCards };
+}
+
+export function extractFlashcardsFromText(text: string, settings: SplitSettings): FlashCard[] {
+  return extractFlashcardsWithMeta(text, settings).cards;
 }

@@ -4,6 +4,8 @@ import {
   PARSER_KEYWORDS,
   isFrontKeyword,
   isBackKeyword,
+  isCardKeyword,
+  isBareFieldLabel,
   isMetadataKeyword,
   isCardHeader,
   CARD_HEADER_REGEX,
@@ -140,5 +142,18 @@ describe("Multilingual Keywords & Patterns Suite", () => {
     assert.ok(BULLET_BACK_REGEX.test("- **Answer:** It is Y."));
     assert.ok(BULLET_BACK_REGEX.test("* **Réponse:** C'est Y."));
     assert.ok(BULLET_BACK_REGEX.test("- **Respuesta:** Es Y."));
+  });
+
+  test("isCardKeyword and isBareFieldLabel detect bare delimiter labels accurately", () => {
+    assert.ok(isCardKeyword("Karte"));
+    assert.ok(isCardKeyword("Card"));
+    assert.ok(!isCardKeyword("Chart"));
+
+    assert.ok(isBareFieldLabel("**Vorderseite:**"));
+    assert.ok(isBareFieldLabel("Front:"));
+    assert.ok(isBareFieldLabel("### Question"));
+    assert.ok(isBareFieldLabel("* **Rückseite:**"));
+    assert.ok(!isBareFieldLabel("**Vorderseite:** Was ist eine Topologie?"));
+    assert.ok(!isBareFieldLabel("1. Wann nennt man einen topologischen Raum Mannigfaltigkeit?"));
   });
 });

@@ -108,6 +108,7 @@ export const METADATA_KEYWORDS_PATTERN = buildAlternation(PARSER_KEYWORDS.metada
  * Pre-compiled regexes for single-word / alias matching (trimmed, normalized strings).
  */
 export const CARD_HEADER_REGEX = new RegExp(`^(?:${CARD_KEYWORDS_PATTERN})\\s*[\\d.:]`, "i");
+export const CARD_ALIASES_REGEX = new RegExp(`^(?:${CARD_KEYWORDS_PATTERN})$`, "i");
 export const FRONT_ALIASES_REGEX = new RegExp(`^(?:${FRONT_KEYWORDS_PATTERN})$`, "i");
 export const BACK_ALIASES_REGEX = new RegExp(`^(?:${BACK_KEYWORDS_PATTERN})$`, "i");
 export const KNOWN_METADATA_REGEX = new RegExp(`^(?:${METADATA_KEYWORDS_PATTERN})\\b`, "i");
@@ -121,6 +122,26 @@ export function isFrontKeyword(str: string): boolean {
 
 export function isBackKeyword(str: string): boolean {
   return BACK_ALIASES_REGEX.test(str.normalize("NFC").trim());
+}
+
+export function isCardKeyword(str: string): boolean {
+  return CARD_ALIASES_REGEX.test(str.normalize("NFC").trim());
+}
+
+/**
+ * Returns true if the input consists solely of a bare front/back label marker
+ * (e.g., "**Vorderseite:**", "Front:", "### Question") with no actual content.
+ */
+export function isBareFieldLabel(str: string): boolean {
+  const cleaned = str
+    .normalize("NFC")
+    .trim()
+    .replace(/^[-*+]\s+/, "")
+    .replace(/^#{1,6}\s+/, "")
+    .replace(/[*_~`:\s]+/g, " ")
+    .trim();
+  if (!cleaned) return false;
+  return isFrontKeyword(cleaned) || isBackKeyword(cleaned);
 }
 
 export function isMetadataKeyword(str: string): boolean {
@@ -137,6 +158,10 @@ export function isCardHeader(str: string): boolean {
 export const HEADING_FRONT_REGEX = new RegExp(`^#{1,4}\\s+[*_~]*(?:${FRONT_KEYWORDS_PATTERN})\\b`, "im");
 export const HEADING_BACK_REGEX = new RegExp(`^#{1,4}\\s+[*_~]*(?:${BACK_KEYWORDS_PATTERN})\\b`, "im");
 export const HEADING_CARD_REGEX = new RegExp(`^#{1,4}\\s+[*_~]*(?:${CARD_KEYWORDS_PATTERN})\\b`, "im");
+export const HEADING_CARD_HEADER_REGEX = new RegExp(
+  `^#{1,6}\\s+[*_~]*(?:${CARD_KEYWORDS_PATTERN})(?:\\s*[\\d.:#]|\\s*[*_~]*$)`,
+  "i"
+);
 
 /**
  * Structural detection patterns for Bullet-list key-value pairs (- Front: / * Question:).
