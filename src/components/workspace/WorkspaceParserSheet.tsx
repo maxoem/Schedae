@@ -9,11 +9,14 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { InlineSplitSettings } from "@/components/flashcard/InlineSplitSettings";
 import { AiSettingsPanel, Toggle, AI_MODEL_PRESETS, useAiSettings } from "@/components/flashcard/AiSettingsPanel";
 import { type SplitSettings } from "@/components/flashcard/SplitSettingsDialog";
 import type { AiModelPresetId } from "@/hooks/useDeckWorkspace";
 import { CARD_TEMPLATES, type CardTemplateId } from "@/converters/templates";
+import { resolveApkgModelConfig, type NoteTypeMode } from "@/converters/jsonToApkg";
+import type { FlashCard } from "@/converters/types";
 import {
   SlidersHorizontal,
   Layers,
@@ -22,6 +25,7 @@ import {
   Tag,
   Sparkles,
   Info,
+  RotateCcw,
 } from "lucide-react";
 import { LLM_FORMAT_INSTRUCTIONS } from "@/data/formatInstructions";
 import { cn } from "@/lib/utils";
@@ -53,6 +57,11 @@ interface WorkspaceParserSheetProps {
   sampleText: string;
   selectedTemplate?: CardTemplateId;
   onTemplateChange?: (template: CardTemplateId) => void;
+  noteTypeMode?: NoteTypeMode;
+  onNoteTypeModeChange?: (mode: NoteTypeMode) => void;
+  customNoteTypeName?: string;
+  onCustomNoteTypeNameChange?: (name: string) => void;
+  activeCards?: FlashCard[];
   // AI Heuristic support
   aiSettings: ReturnType<typeof useAiSettings>;
   onDeriveStencil: () => void;
@@ -79,6 +88,11 @@ export function WorkspaceParserSheet({
   sampleText,
   selectedTemplate = "markdown_basic",
   onTemplateChange,
+  noteTypeMode = "unified",
+  onNoteTypeModeChange,
+  customNoteTypeName = "",
+  onCustomNoteTypeNameChange,
+  activeCards = [],
   aiSettings,
   onDeriveStencil,
   clearStencil,
@@ -104,6 +118,17 @@ export function WorkspaceParserSheet({
 
   const aiExtractionActive = Boolean(aiSettings.stencil);
   const [copied, setCopied] = useState(false);
+
+  const defaultNoteTypeName = CARD_TEMPLATES[selectedTemplate]?.noteTypeName || "Markdown+Katex";
+  const effectiveBaseName = customNoteTypeName.trim() || defaultNoteTypeName;
+  const resolvedModelPreview = React.useMemo(
+    () =>
+      resolveApkgModelConfig(activeCards, selectedTemplate, {
+        noteTypeMode,
+        customNoteTypeName,
+      }),
+    [activeCards, selectedTemplate, noteTypeMode, customNoteTypeName]
+  );
 
   const handleCopyFormatInstructions = React.useCallback(() => {
     navigator.clipboard.writeText(LLM_FORMAT_INSTRUCTIONS);
@@ -313,7 +338,169 @@ export function WorkspaceParserSheet({
                 </div>
               </div>
 
-              {/* Section 3: Anki Field Architecture Guide */}
+              {/* Section 3: Anki Note Type & Reuse Strategy */}
+              <div className="space-y-3.5 pb-6 border-b border-zinc-200/70">
+                <div className="flex items-center justify-between gap-2">
+                  <h4 className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider">
+                    Anki Note Type &amp; Reuse
+                  </h4>
+                  <Badge
+                    variant="secondary"
+                    className="text-[10px] py-0 px-1.5 bg-zinc-100 text-zinc-700 border border-zinc-200/80 font-mono"
+                  >
+                    Stable ID
+                  </Badge>
+                </div>
+
+                {/* Custom Note Type Name Input */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <Label htmlFor="anki-note-type-name" className="text-xs font-semibold text-zinc-900">
+                      Note Type Name in Anki
+                    </Label>
+                    {customNoteTypeName.trim().length > 0 && onCustomNoteTypeNameChange && (
+                      <button
+                        type="button"
+                        onClick={() => onCustomNoteTypeNameChange("")}
+                        className="inline-flex items-center gap-1 text-[11px] text-zinc-500 hover:text-zinc-900 cursor-pointer"
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                        <span>Reset to {defaultNoteTypeName}</span>
+                      </button>
+                    )}
+                  </div>
+                  <Input
+                    id="anki-note-type-name"
+                    type="text"
+                    value={customNoteTypeName}
+                    onChange={(e) => onCustomNoteTypeNameChange?.(e.target.value)}
+                    placeholder={defaultNoteTypeName}
+                    className="h-8 text-xs bg-white border-zinc-200 font-medium text-zinc-900"
+                  />
+                  <p className="text-[11px] text-zinc-500 leading-snug">
+                    Leave blank to use <code className="bg-zinc-100 px-1 py-0.2 rounded font-mono text-zinc-800">{defaultNoteTypeName}</code>. Avoids colliding with Anki&apos;s built-in Basic type.
+                  </p>
+                </div>
+
+                {/* Field Schema Strategy (Unified vs Match Deck Fields) */}
+                <div className="space-y-2">
+                  <Label className="text-xs font-semibold text-zinc-900 block">
+                    Field Schema Across Imports
+                  </Label>
+
+                  <div className="grid grid-cols-1 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => onNoteTypeModeChange?.("unified")}
+                      aria-pressed={noteTypeMode === "unified"}
+                      className={cn(
+                        "w-full text-left p-3 rounded-lg border transition-all cursor-pointer space-y-1",
+                        noteTypeMode === "unified"
+                          ? "border-zinc-900 bg-zinc-50/90 shadow-2xs"
+                          : "border-zinc-200/80 bg-white hover:border-zinc-300 hover:bg-zinc-50/50"
+                      )}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={cn(
+                              "w-3.5 h-3.5 rounded-full border flex items-center justify-center shrink-0",
+                              noteTypeMode === "unified" ? "border-zinc-900 bg-zinc-900" : "border-zinc-300"
+                            )}
+                          >
+                            {noteTypeMode === "unified" && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
+                          </span>
+                          <span className="text-xs font-semibold text-zinc-950">
+                            Unified Note Type
+                          </span>
+                          <Badge
+                            variant="secondary"
+                            className="text-[10px] py-0 px-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200/80 font-medium"
+                          >
+                            Recommended
+                          </Badge>
+                        </div>
+                      </div>
+                      <p className="text-[11px] text-zinc-500 leading-relaxed pl-5.5">
+                        Always includes <code className="bg-zinc-100 px-1 rounded font-mono text-zinc-800">Front</code>,{" "}
+                        <code className="bg-zinc-100 px-1 rounded font-mono text-zinc-800">Back</code>, and{" "}
+                        <code className="bg-zinc-100 px-1 rounded font-mono text-zinc-800">Topic</code> under one shared{" "}
+                        <strong className="font-semibold text-zinc-700">{effectiveBaseName}</strong> Note Type so plain decks and topic-badge decks reuse &amp; update the same type in Anki. Extra fields (e.g. Quelle) get a dedicated variant.
+                      </p>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => onNoteTypeModeChange?.("per_schema")}
+                      aria-pressed={noteTypeMode === "per_schema"}
+                      className={cn(
+                        "w-full text-left p-3 rounded-lg border transition-all cursor-pointer space-y-1",
+                        noteTypeMode === "per_schema"
+                          ? "border-zinc-900 bg-zinc-50/90 shadow-2xs"
+                          : "border-zinc-200/80 bg-white hover:border-zinc-300 hover:bg-zinc-50/50"
+                      )}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={cn(
+                            "w-3.5 h-3.5 rounded-full border flex items-center justify-center shrink-0",
+                            noteTypeMode === "per_schema" ? "border-zinc-900 bg-zinc-900" : "border-zinc-300"
+                          )}
+                        >
+                          {noteTypeMode === "per_schema" && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
+                        </span>
+                        <span className="text-xs font-semibold text-zinc-950">
+                          Match Deck Fields Only
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-zinc-500 leading-relaxed pl-5.5">
+                        Exports only fields actually present in the deck (e.g.{" "}
+                        <strong className="font-semibold text-zinc-700">{effectiveBaseName}</strong> for Q&amp;A vs{" "}
+                        <strong className="font-semibold text-zinc-700">{effectiveBaseName} (Topic)</strong>). Each field set reuses &amp; updates its own stable Anki Note Type without adding unused fields.
+                      </p>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Live Anki Export Metadata Preview */}
+                <div className="p-3 rounded-lg bg-zinc-50 border border-zinc-200/70 space-y-1.5 text-[11px]">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">
+                      Next .apkg Export
+                    </span>
+                    <span className="text-[10px] font-mono text-zinc-500">
+                      ID {resolvedModelPreview.modelId}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-zinc-700">
+                    <span>
+                      Note Type:{" "}
+                      <code className="bg-white border border-zinc-200/80 px-1.5 py-0.5 rounded font-mono font-semibold text-zinc-900">
+                        {resolvedModelPreview.noteTypeName}
+                      </code>
+                    </span>
+                    <span>
+                      Card Type:{" "}
+                      <code className="bg-white border border-zinc-200/80 px-1.5 py-0.5 rounded font-mono text-zinc-800">
+                        {resolvedModelPreview.cardTypeName}
+                      </code>
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1 pt-0.5 text-zinc-600">
+                    <span className="mr-1">Fields:</span>
+                    {resolvedModelPreview.fieldNames.map((f) => (
+                      <code
+                        key={f}
+                        className="text-[10px] bg-white border border-zinc-200/80 px-1.5 py-0.2 rounded font-mono text-zinc-800"
+                      >
+                        {f}
+                      </code>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Section 4: Anki Field Architecture Guide */}
               <div className="space-y-2.5">
                 <h4 className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider">
                   Anki Field Schema Reference

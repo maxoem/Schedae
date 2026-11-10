@@ -12,7 +12,7 @@ import { DeckParserService } from "@/services/deckParser/deckParserService";
 import type { DeckParseResult } from "@/services/deckParser/types";
 import { WORKSPACE_SAMPLES } from "@/services/deckParser/sampleData";
 import type { Stencil } from "@/lib/extraction/types";
-import { createApkg } from "@/converters/jsonToApkg";
+import { createApkg, type NoteTypeMode } from "@/converters/jsonToApkg";
 
 export type AiModelPresetId = "auto" | "gemini" | "chatgpt" | "claude";
 export type ParserRuleId = "auto" | "generic" | "headings" | "bold-italic" | "custom";
@@ -31,6 +31,8 @@ const STORAGE_KEYS = {
   DECK_NAME: "schedae-workspace-deck-name",
   SPLIT_SETTINGS: "schedae-workspace-split-settings",
   TEMPLATE: "schedae-workspace-template",
+  NOTE_TYPE_MODE: "schedae-workspace-note-type-mode",
+  CUSTOM_NOTE_TYPE_NAME: "schedae-workspace-custom-note-type-name",
   MODEL: "schedae-workspace-model",
   VIEW_MODE: "schedae-workspace-view-mode",
   BUILDER_BATCHES: "schedae-workspace-builder-batches",
@@ -65,6 +67,15 @@ export function useDeckWorkspace(aiStencil?: Stencil | null) {
 
   const [selectedTemplate, setSelectedTemplate] = useState<CardTemplateId>(() => {
     return (localStorage.getItem(STORAGE_KEYS.TEMPLATE) as CardTemplateId) || "markdown_basic";
+  });
+
+  const [noteTypeMode, setNoteTypeMode] = useState<NoteTypeMode>(() => {
+    const saved = localStorage.getItem(STORAGE_KEYS.NOTE_TYPE_MODE);
+    return saved === "per_schema" ? "per_schema" : "unified";
+  });
+
+  const [customNoteTypeName, setCustomNoteTypeName] = useState<string>(() => {
+    return localStorage.getItem(STORAGE_KEYS.CUSTOM_NOTE_TYPE_NAME) || "";
   });
 
   const [selectedModel, setSelectedModel] = useState<AiModelPresetId>(() => {
@@ -199,6 +210,14 @@ export function useDeckWorkspace(aiStencil?: Stencil | null) {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.TEMPLATE, selectedTemplate);
   }, [selectedTemplate]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.NOTE_TYPE_MODE, noteTypeMode);
+  }, [noteTypeMode]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.CUSTOM_NOTE_TYPE_NAME, customNoteTypeName);
+  }, [customNoteTypeName]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.MODEL, selectedModel);
@@ -349,7 +368,10 @@ export function useDeckWorkspace(aiStencil?: Stencil | null) {
     setExportError(null);
     try {
       const resolvedDeckName = deckName.trim() || "Exported_Deck";
-      const blob = await createApkg(cardsToExport, resolvedDeckName, selectedTemplate, deckCss);
+      const blob = await createApkg(cardsToExport, resolvedDeckName, selectedTemplate, deckCss, {
+        noteTypeMode,
+        customNoteTypeName,
+      });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -361,7 +383,7 @@ export function useDeckWorkspace(aiStencil?: Stencil | null) {
     } finally {
       setIsProcessing(false);
     }
-  }, [deckCards, draftCards, deckName, selectedTemplate, deckCss]);
+  }, [deckCards, draftCards, deckName, selectedTemplate, deckCss, noteTypeMode, customNoteTypeName]);
 
   return {
     sourceText,
@@ -375,6 +397,10 @@ export function useDeckWorkspace(aiStencil?: Stencil | null) {
     setDeckName,
     selectedTemplate,
     setSelectedTemplate,
+    noteTypeMode,
+    setNoteTypeMode,
+    customNoteTypeName,
+    setCustomNoteTypeName,
     selectedModel,
     setSelectedModel,
     parserRule,

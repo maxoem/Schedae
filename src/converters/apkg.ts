@@ -26,6 +26,7 @@ interface Model {
 }
 
 interface ModelInfo {
+  name: string;
   fieldNames: string[];
   templates: CardTemplate[];
   css: string;
@@ -224,6 +225,7 @@ function loadModelsLegacy(db: Database): Map<string, ModelInfo> | null {
     Object.entries(parsed).map(([mid, m]) => [
       mid,
       {
+        name: m.name ?? "",
         fieldNames: [...m.flds].sort((a, b) => a.ord - b.ord).map((f) => f.name),
         templates: [...m.tmpls].sort((a, b) => a.ord - b.ord),
         css: m.css ?? "",
@@ -307,7 +309,7 @@ function loadModelsNew(db: Database): Map<string, ModelInfo> | null {
         ? readProtoStringField(nt.config, 3)
         : "";
 
-    map.set(String(ntid), { fieldNames, templates, css });
+    map.set(String(ntid), { name: nt.name || "", fieldNames, templates, css });
   }
 
   return map.size ? map : null;
