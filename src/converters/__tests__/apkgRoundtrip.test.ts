@@ -1,9 +1,13 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import JSZip from "jszip";
 import { createApkg, createApkgFromAnkiJson } from "../jsonToApkg";
 import { apkgConverter, decodeApkgRaw } from "../apkg";
 import type { FlashCard } from "../types";
+import { DeckParserService } from "@/services/deckParser/deckParserService";
+import { collectCardsMediaFilenames } from "@/services/mediaStore";
 
 describe("APKG Binary Round-Trip Verification", () => {
   const cards: FlashCard[] = [
@@ -247,5 +251,76 @@ describe("APKG Binary Round-Trip Verification", () => {
       mdDeck?.notes?.[0]?.front.includes("![Transformer Diagram](schedae-aabbcc112233.png)"),
       "Markdown image export must emit flat ![alt](filename) syntax",
     );
+  });
+
+  test("fixture 11-pasted-images converts end-to-end through DeckParserService -> collectCardsMediaFilenames -> createApkg", async () => {
+    const fixturePath = path.resolve(
+      process.cwd(),
+      "src/services/deckParser/__tests__/fixtures/11-pasted-images/input.md",
+    );
+    const inputMd = fs.readFileSync(fixturePath, "utf-8");
+    const parsed = DeckParserService.parse(inputMd);
+    assert.equal(parsed.success, true);
+    assert.equal(parsed.cards.length, 2);
+
+    const referencedFilenames = collectCardsMediaFilenames(parsed.cards);
+    assert.deepEqual(
+      Array.from(referencedFilenames).sort(),
+      [
+        "schedae-001122334455.jpg",
+        "schedae-998877665544.webp",
+        "schedae-a1b2c3d4e5f6.png",
+        "schedae-f1e2d3c4b5a6.png",
+      ],
+      "Must collect all real media refs across Front, Back, and Notes while ignoring inline code examples",
+    );
+
+    const dummyPayloads = Array.from(referencedFilenames).map((filename, idx) => ({
+      filename,
+      data: new Uint8Array([137, 80, 78, 71, idx + 1]),
+    }));
+
+    // Verify HTML <img> export mode across Front, Back, and custom fields
+    const htmlApkg = await createApkg(parsed.cards, "Fixture Images HTML", "markdown_basic", undefined, {
+      imageFormat: "img_tag",
+      mediaFiles: dummyPayloads,
+    });
+    const htmlBuf = await htmlApkg.arrayBuffer();
+    const htmlZip = await JSZip.loadAsync(htmlBuf);
+    const manifest = JSON.parse(await htmlZip.file("media")!.async("string")) as Record<string, string>;
+    for (const payload of dummyPayloads) {
+      const entry = Object.entries(manifest).find(([, name]) => name === payload.filename);
+      assert.ok(entry, `Fixture media '${payload.filename}' must appear in APKG media manifest`);
+      assert.deepEqual(await htmlZip.file(entry[0])!.async("uint8array"), payload.data);
+    }
+
+    const htmlRaw = await decodeApkgRaw(htmlBuf, "reduced", ["front", "back", "flds"]);
+    const htmlNotes = Object.values(
+      htmlRaw.decks.byId as Record<string, { notes?: Array<{ front: string; back: string; flds: string }> }>,
+    ).find((d) => Array.isArray(d.notes) && d.notes.length > 0)?.notes;
+    assert.equal(htmlNotes?.length, 2);
+
+    assert.ok(htmlNotes[0].front.includes('<img src="schedae-a1b2c3d4e5f6.png" alt="Brain MRI slice">'));
+    assert.ok(htmlNotes[0].back.includes('<img src="schedae-001122334455.jpg" alt="Hippocampus label">'));
+    assert.ok(htmlNotes[0].flds.includes('<img src="schedae-998877665544.webp" alt="Sagittal reference">'));
+    assert.ok(htmlNotes[1].back.includes('<img src="schedae-f1e2d3c4b5a6.png" alt="Transformer block">'));
+    assert.ok(htmlNotes[1].back.includes("`![example](media/schedae-ignored.png)`"));
+
+    // Verify flat Markdown reference export mode
+    const mdApkg = await createApkg(parsed.cards, "Fixture Images Markdown", "markdown_basic", undefined, {
+      imageFormat: "markdown",
+      mediaFiles: dummyPayloads,
+    });
+    const mdRaw = await decodeApkgRaw(await mdApkg.arrayBuffer(), "reduced", ["front", "back", "flds"]);
+    const mdNotes = Object.values(
+      mdRaw.decks.byId as Record<string, { notes?: Array<{ front: string; back: string; flds: string }> }>,
+    ).find((d) => Array.isArray(d.notes) && d.notes.length > 0)?.notes;
+    assert.equal(mdNotes?.length, 2);
+
+    assert.ok(mdNotes[0].front.includes("![Brain MRI slice](schedae-a1b2c3d4e5f6.png)"));
+    assert.ok(mdNotes[0].back.includes("![Hippocampus label](schedae-001122334455.jpg)"));
+    assert.ok(mdNotes[0].flds.includes("![Sagittal reference](schedae-998877665544.webp)"));
+    assert.ok(mdNotes[1].back.includes("![Transformer block](schedae-f1e2d3c4b5a6.png)"));
+    assert.ok(!mdNotes[0].flds.includes("media/schedae-"), "Markdown mode must rewrite virtual media/ paths to flat filenames");
   });
 });
