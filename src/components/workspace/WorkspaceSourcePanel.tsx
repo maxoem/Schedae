@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import { FileText, Upload, Trash2, Wand2, Plus, SlidersHorizontal, FileCode2, Check, BookOpen, ChevronDown, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,12 @@ import type { HighlightMarkerPattern } from "@/components/flashcard/SplitSetting
 import { WORKSPACE_SAMPLES } from "@/services/deckParser/sampleData";
 import type { ParserRuleId } from "@/hooks/useDeckWorkspace";
 import { LLM_FORMAT_INSTRUCTIONS } from "@/data/formatInstructions";
+import { WorkspaceMediaTray } from "@/components/workspace/WorkspaceMediaTray";
+import {
+  SUPPORTED_IMAGE_ACCEPT,
+  isSupportedImageFile,
+  type WorkspaceMediaItem,
+} from "@/services/mediaStore";
 
 interface WorkspaceSourcePanelProps {
   value: string;
@@ -25,6 +31,13 @@ interface WorkspaceSourcePanelProps {
   onViewPreview?: () => void;
   isProcessing?: boolean;
   onFileLoaded?: (text: string, filename?: string) => void;
+  mediaItems?: WorkspaceMediaItem[];
+  draftMediaFilenames?: Set<string>;
+  batchMediaFilenames?: Set<string>;
+  missingMediaFilenames?: string[];
+  onAttachMedia?: (files: File[], selectionStart?: number, selectionEnd?: number) => Promise<number | null> | number | null;
+  onInsertMediaSnippet?: (snippet: string, selectionStart?: number, selectionEnd?: number) => number | null;
+  onRemoveMedia?: (filename: string) => void;
 }
 
 export function WorkspaceSourcePanel({
@@ -43,9 +56,24 @@ export function WorkspaceSourcePanel({
   onViewPreview,
   isProcessing,
   onFileLoaded,
+  mediaItems = [],
+  draftMediaFilenames = new Set<string>(),
+  batchMediaFilenames = new Set<string>(),
+  missingMediaFilenames = [],
+  onAttachMedia,
+  onInsertMediaSnippet,
+  onRemoveMedia,
 }: WorkspaceSourcePanelProps) {
   const [sampleMenuOpen, setSampleMenuOpen] = useState(false);
   const [copiedPrompt, setCopiedPrompt] = useState(false);
+  const [cursorRequest, setCursorRequest] = useState<{ pos: number; seq: number } | null>(null);
+  const selectionRef = useRef<{ start: number; end: number } | null>(null);
+
+  const scheduleCursorMove = useCallback((pos: number | null | undefined) => {
+    if (typeof pos !== "number") return;
+    setCursorRequest((prev) => ({ pos, seq: (prev?.seq ?? 0) + 1 }));
+    selectionRef.current = { start: pos, end: pos };
+  }, []);
 
   const handleCopyFormatPrompt = useCallback(() => {
     navigator.clipboard.writeText(LLM_FORMAT_INSTRUCTIONS);
@@ -53,21 +81,51 @@ export function WorkspaceSourcePanel({
     setTimeout(() => setCopiedPrompt(false), 2000);
   }, []);
 
+  const handleAttachImages = useCallback(
+    async (files: File[], start?: number, end?: number) => {
+      if (!onAttachMedia || files.length === 0) return;
+      const s = start ?? selectionRef.current?.start;
+      const e = end ?? selectionRef.current?.end;
+      const nextPos = await onAttachMedia(files, s, e);
+      scheduleCursorMove(nextPos);
+    },
+    [onAttachMedia, scheduleCursorMove],
+  );
+
+  const handleInsertSnippet = useCallback(
+    (snippet: string) => {
+      if (!onInsertMediaSnippet) return;
+      const nextPos = onInsertMediaSnippet(snippet, selectionRef.current?.start, selectionRef.current?.end);
+      scheduleCursorMove(nextPos);
+    },
+    [onInsertMediaSnippet, scheduleCursorMove],
+  );
+
   const onDrop = useCallback(
     (acceptedFiles: File[]) => {
       if (acceptedFiles.length === 0) return;
-      const file = acceptedFiles[0];
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const text = e.target?.result as string;
-        if (text) {
-          onChange(text);
-          if (onFileLoaded) onFileLoaded(text, file.name);
-        }
-      };
-      reader.readAsText(file);
+
+      const imageFiles = acceptedFiles.filter((f) => isSupportedImageFile(f));
+      const textFiles = acceptedFiles.filter((f) => !isSupportedImageFile(f));
+
+      if (imageFiles.length > 0) {
+        void handleAttachImages(imageFiles);
+      }
+
+      if (textFiles.length > 0) {
+        const file = textFiles[0];
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const text = e.target?.result as string;
+          if (text) {
+            onChange(text);
+            if (onFileLoaded) onFileLoaded(text, file.name);
+          }
+        };
+        reader.readAsText(file);
+      }
     },
-    [onChange, onFileLoaded]
+    [onChange, onFileLoaded, handleAttachImages]
   );
 
   const { getRootProps, getInputProps, isDragActive, open: openFileDialog } = useDropzone({
@@ -76,8 +134,8 @@ export function WorkspaceSourcePanel({
     accept: {
       "application/json": [".json"],
       "text/plain": [".txt", ".md"],
+      ...SUPPORTED_IMAGE_ACCEPT,
     },
-    maxFiles: 1,
   });
 
   const charCount = value.length;
@@ -94,8 +152,8 @@ export function WorkspaceSourcePanel({
       {isDragActive && (
         <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-background/90 backdrop-blur-xs border-2 border-primary border-dashed m-2 rounded-lg">
           <Upload className="w-10 h-10 text-primary mb-2 animate-bounce" />
-          <p className="text-base font-semibold text-primary">Drop Markdown or JSON file to parse</p>
-          <p className="text-xs text-muted-foreground mt-1">Accepts .md, .txt, .json</p>
+          <p className="text-base font-semibold text-primary">Drop Markdown, JSON, or images</p>
+          <p className="text-xs text-muted-foreground mt-1">Accepts .md, .txt, .json, or .png / .jpg / .webp / .gif</p>
         </div>
       )}
 
@@ -256,6 +314,13 @@ export function WorkspaceSourcePanel({
           onChange={onChange}
           markerPatterns={markerPatterns}
           parserRule={parserRule}
+          onImagePaste={(files, start, end) => {
+            void handleAttachImages(files, start, end);
+          }}
+          cursorRequest={cursorRequest}
+          onSelectionChange={(start, end) => {
+            selectionRef.current = { start, end };
+          }}
           placeholder={`Paste notes, textbook markdown, or JSON cards here...
 
 Example:
@@ -266,11 +331,23 @@ It is the problem of determining whether a program will finish running or run fo
 ### Custom Field
 This will be its own field in anki.
 
-Tip: Drop .md or .json files directly onto this pane.`}
+Tip: Paste screenshots directly (Ctrl/Cmd+V) or drop .md, .json, or image files here.`}
           disabled={isProcessing}
           className="flex-1 min-h-0 !rounded-none"
         />
       </div>
+
+      {/* Collapsible Attached Media Subsection (auto-opens when media exists) */}
+      {(mediaItems.length > 0 || missingMediaFilenames.length > 0) && onRemoveMedia && (
+        <WorkspaceMediaTray
+          items={mediaItems}
+          draftFilenames={draftMediaFilenames}
+          batchFilenames={batchMediaFilenames}
+          missingFilenames={missingMediaFilenames}
+          onInsertReference={onInsertMediaSnippet ? handleInsertSnippet : undefined}
+          onRemoveItem={onRemoveMedia}
+        />
+      )}
 
       {/* Editor Footer Status & Save-to-Deck CTA */}
       <div className="p-2 sm:p-2.5 border-t border-[#E5E7EB] bg-muted/20 flex flex-wrap items-center justify-between gap-2 shrink-0">

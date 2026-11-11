@@ -6,8 +6,15 @@ import {
   type ExportMathFormat,
   type MathFormatMode,
 } from "@/utils/mathUtils";
+import { parseLocalMediaFilename } from "@/services/mediaStore/mediaUtils";
 
 export type { ExportMathFormat, MathFormatMode };
+export type ExportImageFormat = "img_tag" | "markdown";
+
+export interface ApkgMediaFile {
+  filename: string;
+  data: Uint8Array | ArrayBuffer | Blob;
+}
 
 const APKG_SCHEMA = `
 CREATE TABLE col (
@@ -471,6 +478,14 @@ export interface CreateApkgExportOptions extends CreateApkgModelOptions {
    * - "anki_mathjax": Opt-in conversion of math into clean native Anki MathJax (`\(...\)` and `\[...\]`).
    */
   mathFormat?: ExportMathFormat;
+  /**
+   * Controls how Markdown image references (`![alt](media/<file>)` or `![alt](url)`) are exported into Anki fields:
+   * - "img_tag" (default): Emits native HTML `<img src="<file>" ...>` tags.
+   * - "markdown": Emits flat Markdown image referencing `![alt](<file>)`.
+   */
+  imageFormat?: ExportImageFormat;
+  /** Binary user media attachments to bundle flat in the exported .apkg archive. */
+  mediaFiles?: ApkgMediaFile[];
 }
 
 export interface FormatMarkdownForAnkiOptions {
@@ -479,6 +494,39 @@ export interface FormatMarkdownForAnkiOptions {
    * Pass "preserve" to leave existing math delimiters unchanged.
    */
   mathFormat?: MathFormatMode;
+  /**
+   * Target image reference format for Anki note fields (default: "img_tag").
+   */
+  imageFormat?: ExportImageFormat;
+}
+
+function escapeHtmlAttr(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function formatImageReferenceForAnki(
+  alt: string,
+  rawSrc: string,
+  title: string,
+  imageFormat: ExportImageFormat,
+): string {
+  const flatSrc = parseLocalMediaFilename(rawSrc) ?? rawSrc.trim();
+  if (imageFormat === "markdown") {
+    const cleanAlt = alt.replace(/[\r\n]/g, " ");
+    return title ? `![${cleanAlt}](${flatSrc} "${title}")` : `![${cleanAlt}](${flatSrc})`;
+  }
+  const attrs = [`src="${escapeHtmlAttr(flatSrc)}"`];
+  if (alt.trim()) {
+    attrs.push(`alt="${escapeHtmlAttr(alt.trim())}"`);
+  }
+  if (title.trim()) {
+    attrs.push(`title="${escapeHtmlAttr(title.trim())}"`);
+  }
+  return `<img ${attrs.join(" ")}>`;
 }
 
 /**
@@ -487,10 +535,11 @@ export interface FormatMarkdownForAnkiOptions {
  * 1. Line endings are normalized and trailing whitespace on lines is stripped.
  * 2. Raw HTML <br> tags are normalized to standard newlines before formatting.
  * 3. Math expressions are formatted for the target renderer ("katex" by default, or opt-in "anki_mathjax").
- * 4. Accidental single-space indentations before top-level list markers (*, -, +, 1.)
+ * 4. Image references are normalized for Anki as either HTML `<img>` tags or flat Markdown image syntax.
+ * 5. Accidental single-space indentations before top-level list markers (*, -, +, 1.)
  *    are removed so Markdown-it does not misclassify them as nested sub-bullets.
- * 5. Paragraph and list newlines are converted to <br> for Anki editor compatibility,
- *    without corrupting multi-line math blocks or code blocks.
+ * 6. Paragraph and list newlines are converted to <br> for Anki editor compatibility,
+ *    without corrupting multi-line math blocks, code blocks, or image references.
  */
 export function formatMarkdownForAnki(
   content: string,
@@ -498,6 +547,7 @@ export function formatMarkdownForAnki(
 ): string {
   if (!content) return "";
   const mathFormat: MathFormatMode = options?.mathFormat ?? "katex";
+  const imageFormat: ExportImageFormat = options?.imageFormat ?? "img_tag";
   let str = content;
 
   // 1. Normalize line endings
@@ -516,8 +566,8 @@ export function formatMarkdownForAnki(
   // 5. Normalize or convert math expressions according to the target export format
   str = formatMathForTarget(str, mathFormat);
 
-  // Protect math formulas and code blocks so that internal newlines in LaTeX matrices,
-  // bracketed display math, or aligned equations are never corrupted with <br> or backslash removals
+  // Protect code blocks, images, and math formulas so that internal newlines or underscores
+  // are never corrupted with <br> or backslash removals
   const placeholders: string[] = [];
   const protect = (match: string) => {
     const idx = placeholders.length;
@@ -525,9 +575,36 @@ export function formatMarkdownForAnki(
     return `XPROTECTEDCHUNK${idx}X`;
   };
 
-  // Step A: Protect existing delimited blocks, inline code, and fenced code blocks
+  // Step A: Protect code blocks first so inline examples like `![alt](media/a.png)` are left verbatim
   str = str.replace(/```[\s\S]*?```/g, protect);
   str = str.replace(/`[^`\n]+`/g, protect);
+
+  // Rewrite & protect Markdown image references (![alt](src) or ![alt](<src> "title"))
+  str = str.replace(
+    /!\[([^\]]*)\]\(\s*(?:<([^>\n]+)>|([^)\s]+))(?:\s+(?:"([^"\n]*)"|'([^'\n]*)'))?\s*\)/g,
+    (_, alt: string, angledSrc: string | undefined, bareSrc: string | undefined, dqTitle: string | undefined, sqTitle: string | undefined) => {
+      const src = (angledSrc ?? bareSrc ?? "").trim();
+      const title = (dqTitle ?? sqTitle ?? "").trim();
+      return protect(formatImageReferenceForAnki(alt, src, title, imageFormat));
+    },
+  );
+
+  // Normalize & protect existing local HTML <img src="media/..."> tags
+  str = str.replace(/<img\b([^>]*)>/gi, (fullTag, attrStr: string) => {
+    const srcMatch = attrStr.match(/\bsrc\s*=\s*(?:"([^"]+)"|'([^']+)')/i);
+    if (!srcMatch) return protect(fullTag);
+    const rawSrc = srcMatch[1] ?? srcMatch[2] ?? "";
+    const localFile = parseLocalMediaFilename(rawSrc);
+    if (!localFile) return protect(fullTag);
+
+    const altMatch = attrStr.match(/\balt\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
+    const titleMatch = attrStr.match(/\btitle\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
+    const alt = altMatch?.[1] ?? altMatch?.[2] ?? "";
+    const title = titleMatch?.[1] ?? titleMatch?.[2] ?? "";
+    return protect(formatImageReferenceForAnki(alt, localFile, title, imageFormat));
+  });
+
+  // Protect math blocks and inline expressions
   str = str.replace(/\$\$[\s\S]*?\$\$/g, protect);
   str = str.replace(/\\{1,2}\[[\s\S]*?\\{1,2}\]/g, protect);
   str = str.replace(/\\{1,2}\([^\n]*?\\{1,2}\)/g, protect);
@@ -584,6 +661,10 @@ export interface CreateApkgOptions extends CreateApkgModelOptions {
    * Pass "preserve" to keep existing delimiters unchanged (e.g. when remaster math normalization is off).
    */
   mathFormat?: MathFormatMode;
+  /** Target image reference format for exported Anki note fields (default: "img_tag"). */
+  imageFormat?: ExportImageFormat;
+  /** Binary user media attachments to bundle flat in the exported .apkg archive. */
+  mediaFiles?: ApkgMediaFile[];
 }
 
 async function initSqlJsInstance() {
@@ -904,26 +985,27 @@ export async function createApkgFromAnkiJson(
   ]);
 
   const mathFormat: MathFormatMode = options?.mathFormat ?? "katex";
+  const imageFormat: ExportImageFormat = options?.imageFormat ?? "img_tag";
 
   for (const entry of noteEntries) {
     const note = entry.note ?? {};
 
     const frontRaw = typeof note.front === "string" ? note.front : "";
     const backRaw = typeof note.back === "string" ? note.back : "";
-    const frontHTML = formatMarkdownForAnki(frontRaw, { mathFormat });
-    const backHTML = formatMarkdownForAnki(backRaw, { mathFormat });
+    const frontHTML = formatMarkdownForAnki(frontRaw, { mathFormat, imageFormat });
+    const backHTML = formatMarkdownForAnki(backRaw, { mathFormat, imageFormat });
     let flds = `${frontHTML}\x1f${backHTML}`;
     if (typeof note.flds === "string" && note.flds.length) {
       const parts = note.flds.split("\x1f");
       if (parts.length >= 2) {
-        parts[0] = frontRaw ? frontHTML : formatMarkdownForAnki(parts[0], { mathFormat });
-        parts[1] = backRaw ? backHTML : formatMarkdownForAnki(parts[1], { mathFormat });
+        parts[0] = frontRaw ? frontHTML : formatMarkdownForAnki(parts[0], { mathFormat, imageFormat });
+        parts[1] = backRaw ? backHTML : formatMarkdownForAnki(parts[1], { mathFormat, imageFormat });
         for (let pIdx = 2; pIdx < parts.length; pIdx++) {
-          parts[pIdx] = formatMarkdownForAnki(parts[pIdx], { mathFormat });
+          parts[pIdx] = formatMarkdownForAnki(parts[pIdx], { mathFormat, imageFormat });
         }
         flds = parts.join("\x1f");
       } else {
-        flds = parts.map((p: string) => formatMarkdownForAnki(p, { mathFormat })).join("\x1f");
+        flds = parts.map((p: string) => formatMarkdownForAnki(p, { mathFormat, imageFormat })).join("\x1f");
       }
     }
 
@@ -1045,8 +1127,20 @@ export async function createApkgFromAnkiJson(
   zip.file("collection.anki2", data);
 
   const mediaObj: Record<string, string> = {};
-  let mediaIndex = 0;
+  const mediaIndex = await bundleStaticAnkiMedia(zip, mediaObj, 0);
+  await appendUserMediaFiles(zip, mediaObj, mediaIndex, options?.mediaFiles);
 
+  zip.file("media", JSON.stringify(mediaObj));
+
+  return zip.generateAsync({ type: "blob" });
+}
+
+async function bundleStaticAnkiMedia(
+  zip: JSZip,
+  mediaObj: Record<string, string>,
+  startIndex: number,
+): Promise<number> {
+  let mediaIndex = startIndex;
   const ankiMediaGlob: Record<string, () => Promise<string>> = typeof (import.meta as any).glob === "function"
     ? (import.meta as any).glob('/public/anki-media/**/*', { query: '?url', import: 'default' })
     : {};
@@ -1063,6 +1157,7 @@ export async function createApkgFromAnkiJson(
       if (response.ok && !isHtmlFallback) {
         const arrayBuffer = await response.arrayBuffer();
         mediaObj[String(mediaIndex)] = filename;
+        // Anki media folder must be flat, so we store everything (css, js, fonts) in the root
         zip.file(String(mediaIndex), arrayBuffer);
         mediaIndex++;
       }
@@ -1071,9 +1166,32 @@ export async function createApkgFromAnkiJson(
     }
   }
 
-  zip.file("media", JSON.stringify(mediaObj));
+  return mediaIndex;
+}
 
-  return zip.generateAsync({ type: "blob" });
+async function appendUserMediaFiles(
+  zip: JSZip,
+  mediaObj: Record<string, string>,
+  startIndex: number,
+  mediaFiles?: ApkgMediaFile[],
+): Promise<number> {
+  if (!mediaFiles?.length) return startIndex;
+
+  let mediaIndex = startIndex;
+  const seenFilenames = new Set(Object.values(mediaObj));
+
+  for (const file of mediaFiles) {
+    const flatName = file.filename.trim();
+    if (!flatName || seenFilenames.has(flatName)) continue;
+
+    const bytes = file.data instanceof Blob ? await file.data.arrayBuffer() : file.data;
+    mediaObj[String(mediaIndex)] = flatName;
+    zip.file(String(mediaIndex), bytes);
+    seenFilenames.add(flatName);
+    mediaIndex++;
+  }
+
+  return mediaIndex;
 }
 
 export async function createApkg(
@@ -1187,13 +1305,14 @@ export async function createApkg(
 
   let idGen = deckId * 100;
   const mathFormat: ExportMathFormat = options?.mathFormat ?? "katex";
+  const imageFormat: ExportImageFormat = options?.imageFormat ?? "img_tag";
 
   for (const card of cards) {
     const noteId = ++idGen;
-    const frontHTML = formatMarkdownForAnki(card.front, { mathFormat });
-    const backHTML = formatMarkdownForAnki(card.back || "", { mathFormat });
+    const frontHTML = formatMarkdownForAnki(card.front, { mathFormat, imageFormat });
+    const backHTML = formatMarkdownForAnki(card.back || "", { mathFormat, imageFormat });
     const extraFlds = customFieldNames.map((name) =>
-      formatMarkdownForAnki(getCustomFieldValue(card.customFields, name), { mathFormat })
+      formatMarkdownForAnki(getCustomFieldValue(card.customFields, name), { mathFormat, imageFormat })
     );
     const flds = [frontHTML, backHTML, ...extraFlds].join("\x1f");
     
@@ -1220,34 +1339,8 @@ export async function createApkg(
   zip.file("collection.anki2", data);
 
   const mediaObj: Record<string, string> = {};
-  let mediaIndex = 0;
-
-  // Automatically fetch and bundle specified media files if present in the public folder.
-  const ankiMediaGlob: Record<string, () => Promise<string>> = typeof (import.meta as any).glob === "function"
-    ? (import.meta as any).glob('/public/anki-media/**/*', { query: '?url', import: 'default' })
-    : {};
-
-  for (const [path, resolveUrl] of Object.entries(ankiMediaGlob)) {
-    const filename = path.split('/').pop();
-    if (!filename || filename === '.DS_Store') continue;
-
-    try {
-      const url = (await resolveUrl()) as string;
-      const response = await fetch(url);
-      
-      const isHtmlFallback = response.headers.get("content-type")?.includes("text/html");
-      if (response.ok && !isHtmlFallback) {
-        const arrayBuffer = await response.arrayBuffer();
-        mediaObj[String(mediaIndex)] = filename;
-        // Anki media folder must be flat, so we store everything (css, js, fonts) in the root
-        zip.file(String(mediaIndex), arrayBuffer);
-        mediaIndex++;
-        console.log(`[Anki Media] Bundled ${filename} from ${path}`);
-      }
-    } catch (e) {
-      console.warn(`[Anki Media] Could not fetch ${filename} for bundling: `, e);
-    }
-  }
+  const mediaIndex = await bundleStaticAnkiMedia(zip, mediaObj, 0);
+  await appendUserMediaFiles(zip, mediaObj, mediaIndex, options?.mediaFiles);
 
   zip.file("media", JSON.stringify(mediaObj));
 

@@ -12,7 +12,17 @@ import { DeckParserService } from "@/services/deckParser/deckParserService";
 import type { DeckParseResult } from "@/services/deckParser/types";
 import { WORKSPACE_SAMPLES } from "@/services/deckParser/sampleData";
 import type { Stencil } from "@/lib/extraction/types";
-import { createApkg, type ExportMathFormat, type NoteTypeMode } from "@/converters/jsonToApkg";
+import { createApkg, type ExportImageFormat, type ExportMathFormat, type NoteTypeMode } from "@/converters/jsonToApkg";
+import {
+  buildMarkdownImageSnippet,
+  collectCardsMediaFilenames,
+  defaultMediaStoreService,
+  extractReferencedMediaFilenames,
+  formatImageAltLabel,
+  spliceTextAtSelection,
+  stripMediaReferencesFromText,
+  type WorkspaceMediaItem,
+} from "@/services/mediaStore";
 
 export type AiModelPresetId = "auto" | "gemini" | "chatgpt" | "claude";
 export type ParserRuleId = "auto" | "generic" | "headings" | "bold-italic" | "custom";
@@ -34,6 +44,7 @@ const STORAGE_KEYS = {
   NOTE_TYPE_MODE: "schedae-workspace-note-type-mode",
   CUSTOM_NOTE_TYPE_NAME: "schedae-workspace-custom-note-type-name",
   MATH_FORMAT: "schedae-workspace-math-format",
+  IMAGE_FORMAT: "schedae-workspace-image-format",
   MODEL: "schedae-workspace-model",
   VIEW_MODE: "schedae-workspace-view-mode",
   BUILDER_BATCHES: "schedae-workspace-builder-batches",
@@ -83,6 +94,15 @@ export function useDeckWorkspace(aiStencil?: Stencil | null) {
     const saved = localStorage.getItem(STORAGE_KEYS.MATH_FORMAT);
     return saved === "anki_mathjax" ? "anki_mathjax" : "katex";
   });
+
+  const [exportImageFormat, setExportImageFormat] = useState<ExportImageFormat>(() => {
+    const saved = localStorage.getItem(STORAGE_KEYS.IMAGE_FORMAT);
+    return saved === "markdown" ? "markdown" : "img_tag";
+  });
+
+  const [mediaItems, setMediaItems] = useState<WorkspaceMediaItem[]>([]);
+  const sourceTextRef = useRef(sourceText);
+  sourceTextRef.current = sourceText;
 
   const [selectedModel, setSelectedModel] = useState<AiModelPresetId>(() => {
     return (localStorage.getItem(STORAGE_KEYS.MODEL) as AiModelPresetId) || "auto";
@@ -230,6 +250,32 @@ export function useDeckWorkspace(aiStencil?: Stencil | null) {
   }, [exportMathFormat]);
 
   useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.IMAGE_FORMAT, exportImageFormat);
+  }, [exportImageFormat]);
+
+  // Rehydrate persisted IndexedDB media blobs on mount and clean up ObjectURLs on unmount
+  useEffect(() => {
+    let cancelled = false;
+    defaultMediaStoreService
+      .rehydrate()
+      .then((items) => {
+        if (cancelled) {
+          defaultMediaStoreService.disposeObjectUrls();
+          return;
+        }
+        setMediaItems(items);
+      })
+      .catch(() => {
+        // Ignore rehydration failures when storage is restricted
+      });
+
+    return () => {
+      cancelled = true;
+      defaultMediaStoreService.disposeObjectUrls();
+    };
+  }, []);
+
+  useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.MODEL, selectedModel);
   }, [selectedModel]);
 
@@ -370,6 +416,95 @@ export function useDeckWorkspace(aiStencil?: Stencil | null) {
     setDeckName(sample.deckTitle);
   }, []);
 
+  // Media tracking across draft notes and saved batches
+  const draftMediaFilenames = useMemo(
+    () => extractReferencedMediaFilenames(sourceText),
+    [sourceText],
+  );
+
+  const batchMediaFilenames = useMemo(
+    () => collectCardsMediaFilenames(deckCards),
+    [deckCards],
+  );
+
+  const missingMediaFilenames = useMemo(() => {
+    const stored = new Set(mediaItems.map((m) => m.filename));
+    const missing: string[] = [];
+    for (const filename of new Set([...draftMediaFilenames, ...batchMediaFilenames])) {
+      if (!stored.has(filename)) missing.push(filename);
+    }
+    return missing;
+  }, [mediaItems, draftMediaFilenames, batchMediaFilenames]);
+
+  const mediaUrlMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const item of mediaItems) {
+      map[item.localRef] = item.objectUrl;
+      map[item.filename] = item.objectUrl;
+    }
+    return map;
+  }, [mediaItems]);
+
+  const attachMediaFiles = useCallback(
+    async (files: File[], selectionStart?: number, selectionEnd?: number): Promise<number | null> => {
+      if (files.length === 0) return null;
+
+      const storedItems: WorkspaceMediaItem[] = [];
+      for (const file of files) {
+        const item = await defaultMediaStoreService.storeImageFile(file, file.name);
+        storedItems.push(item);
+      }
+
+      setMediaItems((prev) => {
+        const byName = new Map(prev.map((item) => [item.filename, item]));
+        for (const item of storedItems) {
+          byName.set(item.filename, item);
+        }
+        return Array.from(byName.values()).sort((a, b) => a.createdAt - b.createdAt);
+      });
+
+      const snippets = storedItems
+        .map((item) => buildMarkdownImageSnippet(item.localRef, formatImageAltLabel(item.originalName)))
+        .join("\n");
+
+      const { value, cursorPos } = spliceTextAtSelection(
+        sourceTextRef.current,
+        snippets,
+        selectionStart,
+        selectionEnd,
+      );
+      sourceTextRef.current = value;
+      setSourceText(value);
+      return cursorPos;
+    },
+    [],
+  );
+
+  const insertMediaSnippet = useCallback(
+    (snippet: string, selectionStart?: number, selectionEnd?: number): number => {
+      const { value, cursorPos } = spliceTextAtSelection(
+        sourceTextRef.current,
+        snippet,
+        selectionStart,
+        selectionEnd,
+      );
+      sourceTextRef.current = value;
+      setSourceText(value);
+      return cursorPos;
+    },
+    [],
+  );
+
+  const removeMediaItem = useCallback(async (filename: string) => {
+    await defaultMediaStoreService.deleteMedia(filename);
+    setMediaItems((prev) => prev.filter((item) => item.filename !== filename));
+    const cleaned = stripMediaReferencesFromText(sourceTextRef.current, filename);
+    if (cleaned !== sourceTextRef.current) {
+      sourceTextRef.current = cleaned;
+      setSourceText(cleaned);
+    }
+  }, []);
+
   // APKG export (exports all saved batch cards plus any active draft cards)
   const exportApkg = useCallback(async () => {
     const cardsToExport = [...deckCards, ...draftCards];
@@ -378,10 +513,14 @@ export function useDeckWorkspace(aiStencil?: Stencil | null) {
     setExportError(null);
     try {
       const resolvedDeckName = deckName.trim() || "Exported_Deck";
+      const referencedFiles = collectCardsMediaFilenames(cardsToExport);
+      const mediaFiles = await defaultMediaStoreService.getExportPayloads(referencedFiles);
       const blob = await createApkg(cardsToExport, resolvedDeckName, selectedTemplate, deckCss, {
         noteTypeMode,
         customNoteTypeName,
         mathFormat: exportMathFormat,
+        imageFormat: exportImageFormat,
+        mediaFiles,
       });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -394,7 +533,7 @@ export function useDeckWorkspace(aiStencil?: Stencil | null) {
     } finally {
       setIsProcessing(false);
     }
-  }, [deckCards, draftCards, deckName, selectedTemplate, deckCss, noteTypeMode, customNoteTypeName, exportMathFormat]);
+  }, [deckCards, draftCards, deckName, selectedTemplate, deckCss, noteTypeMode, customNoteTypeName, exportMathFormat, exportImageFormat]);
 
   return {
     sourceText,
@@ -414,6 +553,16 @@ export function useDeckWorkspace(aiStencil?: Stencil | null) {
     setCustomNoteTypeName,
     exportMathFormat,
     setExportMathFormat,
+    exportImageFormat,
+    setExportImageFormat,
+    mediaItems,
+    draftMediaFilenames,
+    batchMediaFilenames,
+    missingMediaFilenames,
+    mediaUrlMap,
+    attachMediaFiles,
+    insertMediaSnippet,
+    removeMediaItem,
     selectedModel,
     setSelectedModel,
     parserRule,

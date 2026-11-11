@@ -35,6 +35,7 @@ import type { Flashcard } from "@/data/decks";
 import type { DiagnosticIssue } from "@/services/deckParser/types";
 import type { BuilderBatch } from "@/hooks/useDeckWorkspace";
 import { CARD_TEMPLATES, type CardTemplateId } from "@/converters/templates";
+import { WorkspaceMediaProvider } from "@/components/workspace/WorkspaceMediaContext";
 
 interface WorkspacePreviewPanelProps {
   batches: BuilderBatch[];
@@ -56,6 +57,7 @@ interface WorkspacePreviewPanelProps {
   extractTopicBadges?: boolean;
   onBackToSource?: () => void;
   diagnostics: DiagnosticIssue[];
+  mediaUrlMap?: Record<string, string>;
 }
 
 export function WorkspacePreviewPanel({
@@ -78,6 +80,7 @@ export function WorkspacePreviewPanel({
   extractTopicBadges = true,
   onBackToSource,
   diagnostics,
+  mediaUrlMap = {},
 }: WorkspacePreviewPanelProps) {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
@@ -148,7 +151,8 @@ export function WorkspacePreviewPanel({
   const warnings = diagnostics.filter((d) => d.level === "warning" || d.level === "error");
 
   return (
-    <div className="flex flex-col rounded-lg border border-[#E5E7EB] bg-white shadow-xs min-h-0 overflow-hidden h-full">
+    <WorkspaceMediaProvider urlMap={mediaUrlMap}>
+      <div className="flex flex-col rounded-lg border border-[#E5E7EB] bg-white shadow-xs min-h-0 overflow-hidden h-full">
       {/* Panel Header - Exact h-11 (44px) matching Source Notes */}
       <div className="bg-muted/40 px-2.5 sm:px-3.5 h-11 border-b border-[#E5E7EB] flex items-center justify-between shrink-0 gap-2">
         {/* Left: Deck Preview label (plus optional Back to Notes button on narrow viewports) */}
@@ -695,6 +699,7 @@ export function WorkspacePreviewPanel({
           </ScrollArea>
         )}
       </div>
-    </div>
+      </div>
+    </WorkspaceMediaProvider>
   );
 }

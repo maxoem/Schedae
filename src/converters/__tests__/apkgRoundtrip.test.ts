@@ -1,5 +1,6 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
+import JSZip from "jszip";
 import { createApkg, createApkgFromAnkiJson } from "../jsonToApkg";
 import { apkgConverter, decodeApkgRaw } from "../apkg";
 import type { FlashCard } from "../types";
@@ -200,5 +201,51 @@ describe("APKG Binary Round-Trip Verification", () => {
     assert.ok(mathjaxBack.includes("Inline \\(E = mc^2\\)."));
     assert.ok(!mathjaxBack.includes("\\\\["), "Opt-in MathJax must not emit double backslashes");
     assert.ok(!mathjaxBack.includes("\\\\("), "Opt-in MathJax must not emit double backslashes");
+  });
+
+  test("createApkg bundles user mediaFiles into zip manifest and formats note fields per imageFormat", async () => {
+    const pngBytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0, 1, 2, 3]);
+    const imageCards: FlashCard[] = [
+      {
+        front: "Identify this architecture:\n\n![Transformer Diagram](media/schedae-aabbcc112233.png)",
+        back: "Attention block shown cleanly.",
+      },
+    ];
+
+    // 1. Default HTML <img> export
+    const htmlBlob = await createApkg(imageCards, "Media HTML Deck", "default", undefined, {
+      imageFormat: "img_tag",
+      mediaFiles: [{ filename: "schedae-aabbcc112233.png", data: pngBytes }],
+    });
+    const htmlBuf = await htmlBlob.arrayBuffer();
+    const htmlZip = await JSZip.loadAsync(htmlBuf);
+    const htmlManifest = JSON.parse(await htmlZip.file("media")!.async("string")) as Record<string, string>;
+    const entry = Object.entries(htmlManifest).find(([, name]) => name === "schedae-aabbcc112233.png");
+    assert.ok(entry, "Exported .apkg media manifest must include bundled user image");
+    const bundledBytes = await htmlZip.file(entry[0])!.async("uint8array");
+    assert.deepEqual(bundledBytes, pngBytes);
+
+    const htmlRaw = await decodeApkgRaw(htmlBuf, "reduced", ["front", "back"]);
+    const htmlDeck = Object.values(
+      htmlRaw.decks.byId as Record<string, { notes?: Array<{ front: string }> }>,
+    ).find((d) => Array.isArray(d.notes) && d.notes.length > 0);
+    assert.ok(
+      htmlDeck?.notes?.[0]?.front.includes('<img src="schedae-aabbcc112233.png" alt="Transformer Diagram">'),
+      "HTML image export must emit flat <img src=...> tag",
+    );
+
+    // 2. Markdown image export
+    const mdBlob = await createApkg(imageCards, "Media Markdown Deck", "markdown_basic", undefined, {
+      imageFormat: "markdown",
+      mediaFiles: [{ filename: "schedae-aabbcc112233.png", data: pngBytes }],
+    });
+    const mdRaw = await decodeApkgRaw(await mdBlob.arrayBuffer(), "reduced", ["front", "back"]);
+    const mdDeck = Object.values(
+      mdRaw.decks.byId as Record<string, { notes?: Array<{ front: string }> }>,
+    ).find((d) => Array.isArray(d.notes) && d.notes.length > 0);
+    assert.ok(
+      mdDeck?.notes?.[0]?.front.includes("![Transformer Diagram](schedae-aabbcc112233.png)"),
+      "Markdown image export must emit flat ![alt](filename) syntax",
+    );
   });
 });
