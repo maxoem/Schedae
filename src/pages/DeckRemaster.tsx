@@ -76,6 +76,7 @@ export default function DeckRemaster() {
 
   const [config, setConfig] = useState<TransformationConfig>(DEFAULT_CONFIG);
   const [regenerateIds, setRegenerateIds] = useState(true);
+  const [exportAnkiMathJax, setExportAnkiMathJax] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCardIndex, setSelectedCardIndex] = useState(0);
   const [activeTab, setActiveTab] = useState<"diff" | "preview" | "raw">("diff");
@@ -258,7 +259,14 @@ export default function DeckRemaster() {
         transformedJson,
         deckTitle,
         config.targetTemplate,
-        { regenerateIds },
+        {
+          regenerateIds,
+          mathFormat: exportAnkiMathJax
+            ? "anki_mathjax"
+            : config.normalizeMath
+              ? "katex"
+              : "preserve",
+        },
       );
 
       const url = URL.createObjectURL(blob);
@@ -278,7 +286,7 @@ export default function DeckRemaster() {
     } finally {
       setIsExporting(false);
     }
-  }, [deckRawData, noteItems, config, uploadedFile, regenerateIds]);
+  }, [deckRawData, noteItems, config, uploadedFile, regenerateIds, exportAnkiMathJax]);
 
   // Send cards to Schedae Workspace
   const handleSendToWorkspace = useCallback(() => {
@@ -681,6 +689,23 @@ export default function DeckRemaster() {
                       </span>
                       <span className="text-[11px] text-muted-foreground leading-snug">
                         Assigns fresh GUIDs &amp; card IDs so Anki imports cleanly without duplicate skips or notetype conflicts. 100% of scheduling is preserved.
+                      </span>
+                    </div>
+                  </label>
+
+                  <label className="flex items-start gap-2.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={exportAnkiMathJax}
+                      onChange={(e) => setExportAnkiMathJax(e.target.checked)}
+                      className="mt-0.5 rounded border-zinc-300 text-primary focus:ring-primary"
+                    />
+                    <div className="text-xs leading-normal">
+                      <span className="font-medium text-foreground block">
+                        Convert Math to Anki MathJax (Opt-in)
+                      </span>
+                      <span className="text-[11px] text-muted-foreground leading-snug">
+                        Exports formulas as clean <code>\(\)</code> / <code>\[\]</code> instead of plain KaTeX <code>$</code> / <code>$$</code>.
                       </span>
                     </div>
                   </label>

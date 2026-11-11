@@ -104,6 +104,20 @@ describe("DeckTransformer Pipeline & Orchestrator", () => {
       assert.ok(repaired.includes("\\end{align*}"));
       assert.ok(repaired.includes("\\sum_{k=0}^n"));
     });
+
+    test("supports block='true' anki-mathjax, adjacent $$ blocks, double-escaped commands in \\[...\\], and code protection", () => {
+      const input =
+        "\\<anki-mathjax block=\"true\">\\text{IoU} = \\frac{|A \\cap B|}{|A \\cup B|}\\</anki-mathjax>\n" +
+        "Adjacent: $$a$$ + $$b$$\n" +
+        "Double cmd: \\\\[ \\\\frac{1}{2} \\\\]\n" +
+        "Code: `const x = \\(1\\)`";
+      const result = mathTransformer.transform(input);
+      assert.ok(result.includes("$$\\text{IoU} = \\frac{|A \\cap B|}{|A \\cup B|}$$"));
+      assert.ok(result.includes("$$a$$") && result.includes("$$b$$"));
+      assert.ok(!result.includes("$$ + $$"));
+      assert.ok(result.includes("$$\\frac{1}{2}$$"));
+      assert.ok(result.includes("`const x = \\(1\\)`"));
+    });
   });
 
   describe("HtmlToMarkdownTransformer", () => {

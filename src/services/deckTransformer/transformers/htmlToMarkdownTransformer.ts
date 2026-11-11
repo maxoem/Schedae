@@ -42,8 +42,9 @@ export class HtmlToMarkdownTransformer implements ContentTransformer {
 
     let s = content;
 
-    // 1. Protect existing code blocks
+    // 1. Protect existing code blocks and inline code
     s = s.replace(/```[\s\S]*?```/g, protect);
+    s = s.replace(/`[^`\n]+`/g, protect);
     // 2. Protect Anki MathJax tags
     s = s.replace(/\\?<anki-mathjax[^>]*>[\s\S]*?\\?<\/anki-mathjax>/gi, protect);
     // 3. Protect display math $$ ... $$
@@ -51,8 +52,8 @@ export class HtmlToMarkdownTransformer implements ContentTransformer {
     // 4. Protect inline math $ ... $
     s = s.replace(/\$[^$\n]+?\$/g, protect);
     // 5. Protect LaTeX delimiters \[ ... \] and \( ... \)
-    s = s.replace(/\\\\?\[([\s\S]*?)\\\\?\]/g, protect);
-    s = s.replace(/\\\\?\(([\s\S]*?)\\\\?\)/g, protect);
+    s = s.replace(/\\{1,2}\[([\s\S]*?)\\{1,2}\]/g, protect);
+    s = s.replace(/\\{1,2}\(([^\n]*?)\\{1,2}\)/g, protect);
     // 6. Protect LaTeX environments: \begin{...} ... \end{...}
     s = s.replace(/\\begin\{([a-z*]+)\}[\s\S]*?\\end\{\1\}/gi, protect);
 

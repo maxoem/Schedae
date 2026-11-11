@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { CARD_TEMPLATES } from "../templates";
 import { formatMarkdownForAnki } from "../jsonToApkg";
-import { normalizeMathMarkdown } from "../../utils/mathUtils";
+import { convertKatexToAnkiMathJax, normalizeMathMarkdown } from "../../utils/mathUtils";
 
 describe("Markdown & KaTeX Template Rendering", () => {
   test("CARD_TEMPLATES.markdown_basic includes LaTeX delimiters \\( and \\[", () => {
@@ -13,9 +13,10 @@ describe("Markdown & KaTeX Template Rendering", () => {
     assert.ok(qfmt.includes('left: "$"'), "Front template must include inline $ delimiter");
   });
 
-  test("CARD_TEMPLATES.markdown_basic script cleans up Anki MathJax tags, double backslashes, and list <br> spacing", () => {
+  test("CARD_TEMPLATES.markdown_basic script cleans up Anki MathJax tags (including block='true'), double backslashes, and list <br> spacing", () => {
     const qfmt = CARD_TEMPLATES.markdown_basic.qfmt;
     assert.ok(qfmt.includes("anki-mathjax"), "Template should handle anki-mathjax tags");
+    assert.ok(qfmt.includes("(?:1|true)"), "Template should support both block='1' and block='true' anki-mathjax attributes");
     assert.ok(qfmt.includes("replaceHTMLElementsInString"), "Template should decode HTML entities");
     assert.ok(qfmt.includes("[*+-]"), "Template should normalize list markers");
   });
@@ -85,7 +86,7 @@ describe("Markdown & KaTeX Template Rendering", () => {
     );
   });
 
-  test("formatMarkdownForAnki preserves LaTeX square bracket and inline delimiters without corrupting row breaks", () => {
+  test("formatMarkdownForAnki normalizes LaTeX / MathJax delimiters to plain KaTeX by default without corrupting row breaks", () => {
     // 1. Multi-line display math with square brackets \[...\] and row breaks \\
     const inputWithDisplay =
       "Solve the system:\n" +
@@ -100,18 +101,56 @@ describe("Markdown & KaTeX Template Rendering", () => {
     const formattedDisplay = formatMarkdownForAnki(inputWithDisplay);
     assert.ok(
       formattedDisplay.includes(
-        "\\[\n\\begin{aligned}\n2x + y &= 5 \\\\\nx - y &= 1\n\\end{aligned}\n\\]"
+        "$$\n\\begin{aligned}\n2x + y &= 5 \\\\\nx - y &= 1\n\\end{aligned}\n$$"
       ),
-      "Display math inside \\[...\\] must preserve \\\\ row breaks and newlines intact"
+      "Default export must normalize \\[...\\] into plain KaTeX $$...$$ while preserving \\\\ row breaks"
     );
-    assert.ok(!formattedDisplay.includes("aligned<br>"), "Must not insert <br> inside \\[...\\]");
+    assert.ok(!formattedDisplay.includes("\\["), "Default export must not emit Anki MathJax \\[ delimiters");
+    assert.ok(!formattedDisplay.includes("aligned<br>"), "Must not insert <br> inside $$...$$");
     assert.ok(formattedDisplay.startsWith("Solve the system:<br>"));
     assert.ok(formattedDisplay.endsWith("<br>Result follows."));
 
-    // 2. Inline LaTeX parenthesized math \(...\)
-    const inputWithInline = "Consider the function \\( f(x) = x^2 \\) for all \\( x \\in \\mathbb{R} \\).";
+    // 2. Inline LaTeX parenthesized math \(...\) and double-escaped \\(...\\) -> $...$
+    const inputWithInline = "Consider the function \\( f(x) = x^2 \\) for all \\\\( x \\in \\mathbb{R} \\\\).";
     const formattedInline = formatMarkdownForAnki(inputWithInline);
-    assert.equal(formattedInline, inputWithInline, "Inline \\(...\\) math must be preserved untouched");
+    assert.equal(
+      formattedInline,
+      "Consider the function $f(x) = x^2$ for all $x \\in \\mathbb{R}$.",
+      "Default export must normalize \\(...\\) and \\\\(...\\\\) to plain KaTeX $...$"
+    );
+
+    // 3. Preserving explicit preserve mode keeps \[...\] untouched without inserting <br>
+    const preserved = formatMarkdownForAnki(inputWithDisplay, { mathFormat: "preserve" });
+    assert.ok(
+      preserved.includes("\\[\n\\begin{aligned}\n2x + y &= 5 \\\\\nx - y &= 1\n\\end{aligned}\n\\]")
+    );
+  });
+
+  test("formatMarkdownForAnki converts math to clean Anki MathJax delimiters when opt-in is enabled", () => {
+    const input =
+      "$$\n" +
+      "\\text{IoU} = \\frac{|A \\cap B|}{|A \\cup B|}\n" +
+      "$$\n" +
+      "Some text here $inline math$ and double-escaped \\\\(D\\\\).";
+
+    const formatted = formatMarkdownForAnki(input, { mathFormat: "anki_mathjax" });
+    assert.ok(
+      formatted.includes("\\[\n\\text{IoU} = \\frac{|A \\cap B|}{|A \\cup B|}\n\\]"),
+      "Opt-in Anki MathJax must convert $$...$$ to clean \\[...\\]"
+    );
+    assert.ok(formatted.includes("Some text here \\(inline math\\)"));
+    assert.ok(formatted.includes("double-escaped \\(D\\)"));
+    assert.ok(!formatted.includes("\\\\("), "Must never emit double backslashes \\\\(");
+    assert.ok(!formatted.includes("\\\\["), "Must never emit double backslashes \\[");
+    assert.ok(!formatted.includes("$"), "Converted math should not leave raw $ delimiters");
+  });
+
+  test("convertKatexToAnkiMathJax protects code blocks and currency amounts", () => {
+    const input = "Cost is $5 and $10.\n```bash\necho \"$HOME\"\n```\nFormula: $E = mc^2$";
+    const converted = convertKatexToAnkiMathJax(input);
+    assert.ok(converted.includes("Cost is $5 and $10."));
+    assert.ok(converted.includes('echo "$HOME"'));
+    assert.ok(converted.includes("Formula: \\(E = mc^2\\)"));
   });
 
   test("formatMarkdownForAnki wraps bare LaTeX environments in display math and repairs asterisks without double-wrapping", () => {
@@ -169,6 +208,15 @@ describe("Markdown & KaTeX Template Rendering", () => {
     const ankiStray = "Erfahrung \\<anki-mathjax>E\\</anki-mathjax> bezüglich";
     const normAnkiStray = normalizeMathMarkdown(ankiStray);
     assert.equal(normAnkiStray, "Erfahrung $E$ bezüglich");
+
+    // Anki mathjax tag with block="true" and stray backslashes (Anki 2.1.50+ format)
+    const ankiBlockTrue =
+      "Quotient:<br>\\<anki-mathjax block=\"true\">\\text{IoU} = \\frac{|A \\cap B|}{|A \\cup B|}\\</anki-mathjax>";
+    const normAnkiBlockTrue = normalizeMathMarkdown(ankiBlockTrue);
+    assert.ok(
+      normAnkiBlockTrue.includes("$$\\text{IoU} = \\frac{|A \\cap B|}{|A \\cup B|}$$"),
+      "block='true' anki-mathjax must normalize to $$...$$ display math"
+    );
 
     // Double-escaped \\(E\\)
     const doubleEscaped = "Erfahrung \\\\(E\\\\) bezüglich";

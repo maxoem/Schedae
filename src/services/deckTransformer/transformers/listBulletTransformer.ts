@@ -38,7 +38,10 @@ export class ListBulletTransformer implements ContentTransformer {
     };
 
     s = s.replace(/```[\s\S]*?```/g, protect);
+    s = s.replace(/`[^`\n]+`/g, protect);
     s = s.replace(/\$\$[\s\S]*?\$\$/g, protect);
+    s = s.replace(/\\{1,2}\[[\s\S]*?\\{1,2}\]/g, protect);
+    s = s.replace(/\\{1,2}\([^\n]*?\\{1,2}\)/g, protect);
     s = s.replace(/\\begin\{([a-z*]+)\}[\s\S]*?\\end\{\1\}/gi, protect);
     s = s.replace(/\\?<anki-mathjax[^>]*>[\s\S]*?\\?<\/anki-mathjax>/gi, protect);
     s = s.replace(/\$[^$\n]+?\$/g, protect);
