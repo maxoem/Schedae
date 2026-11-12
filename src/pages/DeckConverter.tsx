@@ -1,12 +1,22 @@
 import { useState, useCallback, useMemo, useEffect } from "react";
 import { useDropzone } from "react-dropzone";
 import { Link, useNavigate } from "react-router-dom";
-import { Download, Upload, Copy, Check, LayoutGrid, Database, Settings2, FileJson, RefreshCw, Braces, Sparkles, ChevronDown, AlertCircle, FileArchive, BookOpen, Lock } from "lucide-react";
+import { Download, Upload, Copy, Check, LayoutGrid, Database, Settings2, FileJson, RefreshCw, Braces, Sparkles, ChevronDown, AlertCircle, AlertTriangle, FileArchive } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from "@/components/ui/breadcrumb";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { LlmMarkdownFieldSelector } from "@/components/converter/LlmMarkdownFieldSelector";
+import {
+  DEFAULT_LLM_MARKDOWN_FIELDS,
+  chunkLlmMarkdownByTokens,
+  evaluateLlmMergeCapability,
+  exportDeckToLlmMarkdown,
+  hasAnyLlmFieldSelected,
+  type LlmMarkdownField,
+  type LlmMarkdownFieldSelection,
+} from "@/services/llmMarkdown";
 import { decodeApkgRaw } from "@/converters/apkg";
 import TurndownService from "turndown";
 import JSZip from "jszip";
@@ -100,7 +110,18 @@ export default function DeckConverter() {
   const [convertMarkdown, setConvertMarkdown] = useState(true);
   const [sanitizeMarkdown, setSanitizeMarkdown] = useState(true);
   const [outputFormat, setOutputFormat] = useState<'json' | 'llm-md'>('json');
+  const [llmMdFields, setLlmMdFields] = useState<LlmMarkdownFieldSelection>(DEFAULT_LLM_MARKDOWN_FIELDS);
   const [showFormatGuide, setShowFormatGuide] = useState(false);
+
+  const llmMergeCapability = useMemo(
+    () => evaluateLlmMergeCapability(llmMdFields),
+    [llmMdFields],
+  );
+  const hasAnyLlmField = hasAnyLlmFieldSelected(llmMdFields);
+
+  const toggleLlmMdField = (field: LlmMarkdownField) => {
+    setLlmMdFields((prev) => ({ ...prev, [field]: !prev[field] }));
+  };
 
   // Field Categories for UI
   const contentFields = ['front', 'back', 'extra', 'flds'];
@@ -118,9 +139,18 @@ export default function DeckConverter() {
     tags: 'Tags for thematic categorization.',
   };
 
-  const exportSummary = exportMode === 'reduced'
-    ? `${selectedFields.length} Fields${includeScheduling ? ' + Scheduling' : ''}${includeDeckPreset ? ' + Preset' : ''}`
-    : 'Full Database Export';
+  const selectedLlmFieldLabels = [
+    llmMdFields.id ? 'ID' : null,
+    llmMdFields.question ? 'Q' : null,
+    llmMdFields.answer ? 'A' : null,
+  ].filter(Boolean);
+
+  const exportSummary =
+    outputFormat === 'llm-md'
+      ? `LLM-MD · ${selectedLlmFieldLabels.length}/3 Fields${selectedLlmFieldLabels.length ? ` (${selectedLlmFieldLabels.join(', ')})` : ''}`
+      : exportMode === 'reduced'
+        ? `${selectedFields.length} Fields${includeScheduling ? ' + Scheduling' : ''}${includeDeckPreset ? ' + Preset' : ''}`
+        : 'Full Database Export';
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     const nextFile = acceptedFiles[0];
@@ -185,31 +215,6 @@ export default function DeckConverter() {
     return Math.ceil(text.length / 4);
   };
 
-  const formatGuideComment = `# LLM-Markdown Format Guide
-# ===========================
-# Bearbeite die Karten unten nach Bedarf. Format:
-# ### <CardId> oder ### <DeckId>:<CardId>
-# Q: <Frage/Prompt>
-# A: <Antwort>
-# ---
-#
-# Spezialoptionen:
-# - [DELETE] statt Q/A zum Löschen einer Karte
-# - Alle anderen Felder bleiben unverändert
-# - Stelle sicher, dass die Card IDs identisch bleiben
-#
-# Beispiel - Karte bearbeiten:
-# ### 12345
-# Q: Neue Frage?
-# A: Neue Antwort
-# ---
-#
-# Beispiel - Karte löschen:
-# ### 12346
-# [DELETE]
-# ---
-`;
-
   // Apply Markdown transformation if requested
   const processedResult = useMemo(() => {
     if (!state) return null;
@@ -263,28 +268,13 @@ export default function DeckConverter() {
 
   const previewContent = useMemo(() => {
     if (!processedResult) return "";
-    
+
     if (outputFormat === 'llm-md' && exportMode === 'reduced') {
-      let mdOutput = "";
-      if (Array.isArray(processedResult.notes)) {
-        mdOutput = processedResult.notes.map((note: any) => 
-          `### ${note.id || 'unknown'}\nQ: ${note.front || ''}\nA: ${note.back || ''}\n---`
-        ).join('\n\n');
-      } else if (processedResult?.decks?.byId) {
-        Object.keys(processedResult.decks.byId).forEach(deckId => {
-          const deck = processedResult.decks.byId[deckId];
-          if (Array.isArray(deck.notes)) {
-            deck.notes.forEach((note: any) => {
-              mdOutput += `### ${deckId}:${note.id || 'unknown'}\nQ: ${note.front || ''}\nA: ${note.back || ''}\n---\n\n`;
-            });
-          }
-        });
-      }
-      return `${formatGuideComment}\n\n${mdOutput.trim()}`;
+      return exportDeckToLlmMarkdown(processedResult, llmMdFields);
     }
-    
+
     return JSON.stringify(processedResult, null, 2);
-  }, [processedResult, outputFormat, exportMode, formatGuideComment]);
+  }, [processedResult, outputFormat, exportMode, llmMdFields]);
   const cardCount = useMemo(() => {
     if (exportMode !== 'reduced' || !processedResult) return null;
 
@@ -351,33 +341,6 @@ export default function DeckConverter() {
     setSelectedFields(prev => prev.includes(f) ? prev.filter(x => x !== f) : [...prev, f]);
   };
 
-  // Split markdown by card separator and chunk into files
-  const chunkMarkdownByTokens = (markdown: string, maxTokensPerChunk: number): string[] => {
-    const cardBlocks = markdown.split('\n---\n').filter(b => b.trim());
-    const chunks: string[] = [];
-    let currentChunk = '';
-    let currentTokens = 0;
-
-    cardBlocks.forEach((block) => {
-      const blockTokens = estimateTokens(block);
-      
-      if (currentTokens + blockTokens > maxTokensPerChunk && currentChunk.length > 0) {
-        chunks.push(currentChunk.trim());
-        currentChunk = block;
-        currentTokens = blockTokens;
-      } else {
-        currentChunk += (currentChunk ? '\n---\n' : '') + block;
-        currentTokens += blockTokens;
-      }
-    });
-
-    if (currentChunk.trim()) {
-      chunks.push(currentChunk.trim());
-    }
-
-    return chunks.length > 0 ? chunks : [markdown];
-  };
-
   // Download as single markdown file
   const downloadSingleMarkdown = useCallback(() => {
     if (!previewContent) return;
@@ -393,8 +356,8 @@ export default function DeckConverter() {
   // Download as chunked zip for large files
   const downloadChunkedZip = useCallback(async () => {
     if (!previewContent) return;
-    
-    const chunks = chunkMarkdownByTokens(previewContent, TOKEN_THRESHOLD_PER_CHUNK);
+
+    const chunks = chunkLlmMarkdownByTokens(previewContent, TOKEN_THRESHOLD_PER_CHUNK);
     const zip = new JSZip();
     
     chunks.forEach((chunk, idx) => {
@@ -581,51 +544,62 @@ export default function DeckConverter() {
             <div className="flex-1 min-h-0 bg-background/50 relative">
               <ScrollArea className="absolute inset-0 h-full w-full">
                 <div className="p-4 flex flex-col gap-4">
-                  <div className={`rounded-lg border bg-card p-4 space-y-3 transition-all ${exportMode === 'full' ? 'opacity-40 pointer-events-none grayscale' : ''}`}>
-                    <div className="flex items-center justify-between border-b pb-2">
-                      <label className="text-xs font-semibold text-foreground uppercase tracking-wider">Metadata</label>
-                    </div>
-                    <div className="flex flex-wrap gap-2 pt-1">
-                      {metaFields.map(f => (
-                        <Tooltip key={f}>
-                          <TooltipTrigger asChild>
-                            <button
-                              onClick={() => toggleField(f)}
-                              className={`text-[11px] font-medium px-3 py-1.5 rounded-full border transition-colors ${selectedFields.includes(f) ? 'bg-zinc-900 text-zinc-50 border-zinc-900 shadow-xs' : 'bg-background hover:bg-muted text-muted-foreground'}`}
-                            >
-                              {f}
-                            </button>
-                          </TooltipTrigger>
-                          <TooltipContent side="top" className="text-xs">
-                            {fieldDescriptions[f]}
-                          </TooltipContent>
-                        </Tooltip>
-                      ))}
-                    </div>
-                  </div>
+                  {outputFormat === 'llm-md' ? (
+                    <LlmMarkdownFieldSelector
+                      selection={llmMdFields}
+                      capability={llmMergeCapability}
+                      onToggleField={toggleLlmMdField}
+                      onSelectAll={() => setLlmMdFields(DEFAULT_LLM_MARKDOWN_FIELDS)}
+                    />
+                  ) : (
+                    <>
+                      <div className={`rounded-lg border bg-card p-4 space-y-3 transition-all ${exportMode === 'full' ? 'opacity-40 pointer-events-none grayscale' : ''}`}>
+                        <div className="flex items-center justify-between border-b pb-2">
+                          <label className="text-xs font-semibold text-foreground uppercase tracking-wider">Metadata</label>
+                        </div>
+                        <div className="flex flex-wrap gap-2 pt-1">
+                          {metaFields.map(f => (
+                            <Tooltip key={f}>
+                              <TooltipTrigger asChild>
+                                <button
+                                  onClick={() => toggleField(f)}
+                                  className={`text-[11px] font-medium px-3 py-1.5 rounded-full border transition-colors ${selectedFields.includes(f) ? 'bg-zinc-900 text-zinc-50 border-zinc-900 shadow-xs' : 'bg-background hover:bg-muted text-muted-foreground'}`}
+                                >
+                                  {f}
+                                </button>
+                              </TooltipTrigger>
+                              <TooltipContent side="top" className="text-xs">
+                                {fieldDescriptions[f]}
+                              </TooltipContent>
+                            </Tooltip>
+                          ))}
+                        </div>
+                      </div>
 
-                  <div className={`rounded-lg border bg-card p-4 space-y-3 transition-all ${exportMode === 'full' ? 'opacity-40 pointer-events-none grayscale' : ''}`}>
-                    <div className="flex items-center justify-between border-b pb-2">
-                      <label className="text-xs font-semibold text-foreground uppercase tracking-wider">Content</label>
-                    </div>
-                    <div className="flex flex-wrap gap-2 pt-1">
-                      {contentFields.map(f => (
-                        <Tooltip key={f}>
-                          <TooltipTrigger asChild>
-                            <button
-                              onClick={() => toggleField(f)}
-                              className={`text-[11px] font-medium px-3 py-1.5 rounded-full border transition-colors ${selectedFields.includes(f) ? 'bg-zinc-900 text-zinc-50 border-zinc-900 shadow-xs' : 'bg-background hover:bg-muted text-muted-foreground'}`}
-                            >
-                              {f}
-                            </button>
-                          </TooltipTrigger>
-                          <TooltipContent side="top" className="text-xs">
-                            {fieldDescriptions[f]}
-                          </TooltipContent>
-                        </Tooltip>
-                      ))}
-                    </div>
-                  </div>
+                      <div className={`rounded-lg border bg-card p-4 space-y-3 transition-all ${exportMode === 'full' ? 'opacity-40 pointer-events-none grayscale' : ''}`}>
+                        <div className="flex items-center justify-between border-b pb-2">
+                          <label className="text-xs font-semibold text-foreground uppercase tracking-wider">Content</label>
+                        </div>
+                        <div className="flex flex-wrap gap-2 pt-1">
+                          {contentFields.map(f => (
+                            <Tooltip key={f}>
+                              <TooltipTrigger asChild>
+                                <button
+                                  onClick={() => toggleField(f)}
+                                  className={`text-[11px] font-medium px-3 py-1.5 rounded-full border transition-colors ${selectedFields.includes(f) ? 'bg-zinc-900 text-zinc-50 border-zinc-900 shadow-xs' : 'bg-background hover:bg-muted text-muted-foreground'}`}
+                                >
+                                  {f}
+                                </button>
+                              </TooltipTrigger>
+                              <TooltipContent side="top" className="text-xs">
+                                {fieldDescriptions[f]}
+                              </TooltipContent>
+                            </Tooltip>
+                          ))}
+                        </div>
+                      </div>
+                    </>
+                  )}
 
                   <div className={`rounded-lg border bg-card p-4 space-y-3 transition-all ${outputFormat === 'llm-md' ? '' : 'opacity-40 pointer-events-none grayscale'}`}>
                     <button
@@ -638,17 +612,23 @@ export default function DeckConverter() {
                     {showFormatGuide && (
                       <div className="mt-3 pt-3 border-t space-y-2 text-xs text-muted-foreground leading-relaxed">
                         <div className="space-y-2">
-                          <p className="font-semibold text-foreground">Editing Structure:</p>
-                          <div className="bg-background p-2 rounded border border-border/50 font-mono text-[10px] space-y-1">
-                            <code>### CardId</code>
-                            <code>Q: Your Question?</code>
-                            <code>A: Your Answer</code>
-                            <code>---</code>
+                          <p className="font-semibold text-foreground">Current Export Structure:</p>
+                          <div className="bg-background p-2 rounded border border-border/50 font-mono text-[10px] flex flex-col gap-0.5">
+                            {hasAnyLlmField ? (
+                              <>
+                                {llmMdFields.id && <code>### CardId</code>}
+                                {llmMdFields.question && <code>Q: Your Question?</code>}
+                                {llmMdFields.answer && <code>A: Your Answer</code>}
+                                <code>---</code>
+                              </>
+                            ) : (
+                              <span className="text-muted-foreground italic">No fields selected</span>
+                            )}
                           </div>
                         </div>
                         <div className="space-y-2">
                           <p className="font-semibold text-foreground">To Delete Cards:</p>
-                          <div className="bg-background p-2 rounded border border-border/50 font-mono text-[10px] space-y-1">
+                          <div className="bg-background p-2 rounded border border-border/50 font-mono text-[10px] flex flex-col gap-0.5">
                             <code>### CardId</code>
                             <code>[DELETE]</code>
                             <code>---</code>
@@ -657,9 +637,9 @@ export default function DeckConverter() {
                         <div className="space-y-2">
                           <p className="font-semibold text-foreground">Key Rules:</p>
                           <ul className="list-disc list-inside space-y-1 opacity-90">
-                            <li>Card IDs must remain untouched</li>
+                            <li>Card IDs must remain untouched for merging</li>
                             <li>Ignore system comment header</li>
-                            <li>Unchanged fields will be preserved</li>
+                            <li>Omitted & unchanged fields stay preserved during partial merge</li>
                             <li>Copy & paste response into LLM Merge Assistant</li>
                           </ul>
                         </div>
@@ -780,18 +760,58 @@ export default function DeckConverter() {
                   </div>
                 </div>
               ) : (
-                <>
+                <div className="flex flex-col h-full">
                   <div className="p-3 border-b bg-muted/20 flex flex-col gap-2 shrink-0">
-                    <div className="flex gap-2 flex-wrap">
+                    <div className="flex gap-2 flex-wrap items-center">
                       {outputFormat === 'llm-md' && exportMode === 'reduced' && (
-                        <Button
-                          onClick={() => navigate('/llm-merge', { state: { originalJson: state.rawResult, deckName: state.sourceFile.name } })}
-                          size="sm"
-                          variant="default"
-                          className="h-8 gap-1.5 text-xs shadow-2xs"
-                        >
-                          <Sparkles className="w-3.5 h-3.5" /> Open Merge Assistant
-                        </Button>
+                        <>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="inline-flex">
+                                <Button
+                                  onClick={() =>
+                                    navigate('/llm-merge', {
+                                      state: {
+                                        originalJson: state.rawResult,
+                                        deckName: state.sourceFile.name,
+                                        exportedFields: llmMdFields,
+                                      },
+                                    })
+                                  }
+                                  disabled={!llmMergeCapability.canOpenMergeAssistant}
+                                  size="sm"
+                                  variant="default"
+                                  className="h-8 gap-1.5 text-xs shadow-2xs"
+                                >
+                                  <Sparkles className="w-3.5 h-3.5" />
+                                  {llmMergeCapability.status === 'partial'
+                                    ? 'Open Merge Assistant (Partial)'
+                                    : 'Open Merge Assistant'}
+                                </Button>
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent side="bottom" className="text-xs max-w-xs">
+                              {llmMergeCapability.message}
+                            </TooltipContent>
+                          </Tooltip>
+
+                          {llmMergeCapability.status !== 'full' && (
+                            <div
+                              className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border ${
+                                llmMergeCapability.status === 'partial'
+                                  ? 'text-amber-800 bg-amber-50 border-amber-200'
+                                  : 'text-destructive bg-destructive/10 border-destructive/30'
+                              }`}
+                            >
+                              {llmMergeCapability.status === 'partial' ? (
+                                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                              ) : (
+                                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                              )}
+                              <span>{llmMergeCapability.title}</span>
+                            </div>
+                          )}
+                        </>
                       )}
                     </div>
                     {outputFormat === 'llm-md' && state && shouldRecommendChunking && (
@@ -831,6 +851,7 @@ export default function DeckConverter() {
                             <>
                               <Button
                                 onClick={downloadChunkedZip}
+                                disabled={!hasAnyLlmField}
                                 size="sm"
                                 className="h-8 gap-1.5 text-xs shadow-2xs font-semibold"
                               >
@@ -838,6 +859,7 @@ export default function DeckConverter() {
                               </Button>
                               <Button
                                 onClick={downloadSingleMarkdown}
+                                disabled={!hasAnyLlmField}
                                 variant="outline"
                                 size="sm"
                                 className="h-8 gap-1.5 text-xs bg-background"
@@ -848,6 +870,7 @@ export default function DeckConverter() {
                           ) : (
                             <Button
                               onClick={downloadSingleMarkdown}
+                              disabled={!hasAnyLlmField}
                               size="sm"
                               className="h-8 gap-1.5 text-xs shadow-2xs"
                             >
@@ -861,7 +884,7 @@ export default function DeckConverter() {
                         variant="outline"
                         size="sm"
                         className="h-8 gap-1.5 text-xs bg-background"
-                        disabled={!state}
+                        disabled={!state || (outputFormat === 'llm-md' && !hasAnyLlmField)}
                       >
                         {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
                         {copied ? 'Copied' : 'Copy'}
@@ -879,15 +902,27 @@ export default function DeckConverter() {
                     </div>
                   </div>
 
-                  <ScrollArea className="absolute inset-x-0 bottom-0 top-[45px] w-full h-full">
-                    <pre
-                      aria-label="JSON Output"
-                      className="inline-block min-w-full bg-transparent p-5 font-mono text-[13px] leading-relaxed whitespace-pre text-foreground selection:bg-blue-500/30 dark:selection:bg-blue-400/40"
-                    >
-                      {previewContent}
-                    </pre>
-                  </ScrollArea>
-                </>
+                  <div className="relative flex-1 min-h-0">
+                    {outputFormat === 'llm-md' && !hasAnyLlmField ? (
+                      <div className="h-full flex flex-col items-center justify-center gap-2 p-6 text-center text-muted-foreground">
+                        <AlertCircle className="w-8 h-8 opacity-40" />
+                        <p className="text-xs font-medium text-foreground">No LLM-MD fields selected</p>
+                        <p className="text-xs max-w-xs">
+                          Enable at least one field (ID, Question, or Answer) in the configuration panel to generate Markdown output.
+                        </p>
+                      </div>
+                    ) : (
+                      <ScrollArea className="absolute inset-0 h-full w-full">
+                        <pre
+                          aria-label={outputFormat === 'llm-md' && exportMode === 'reduced' ? 'LLM Markdown Output' : 'JSON Output'}
+                          className="inline-block min-w-full bg-transparent p-5 font-mono text-[13px] leading-relaxed whitespace-pre text-foreground selection:bg-blue-500/30 dark:selection:bg-blue-400/40"
+                        >
+                          {previewContent}
+                        </pre>
+                      </ScrollArea>
+                    )}
+                  </div>
+                </div>
               )}
             </div>
           </div>
