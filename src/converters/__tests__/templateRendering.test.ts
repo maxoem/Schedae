@@ -3,6 +3,7 @@ import { describe, test } from "node:test";
 import { CARD_TEMPLATES } from "../templates";
 import { formatMarkdownForAnki } from "../jsonToApkg";
 import { convertKatexToAnkiMathJax, normalizeMathMarkdown } from "../../utils/mathUtils";
+import { preparePreviewContent } from "../../utils/previewContent";
 
 describe("Markdown & KaTeX Template Rendering", () => {
   test("CARD_TEMPLATES.markdown_basic includes LaTeX delimiters \\( and \\[", () => {
@@ -245,5 +246,124 @@ describe("Markdown & KaTeX Template Rendering", () => {
     );
     assert.ok(!mdOut.includes("media/schedae-a1b2c3_test.png"), "markdown mode must strip virtual media/ prefix");
     assert.ok(mdOut.includes("`![code](media/ignore_me.png)`"));
+  });
+
+  test("CARD_TEMPLATES.markdown_basic unescapes HTML entities before markdownit.render so HTML tags and images render as elements", () => {
+    const qfmt = CARD_TEMPLATES.markdown_basic.qfmt;
+    // Verify that applyRenderers unescapes innerHTML before markdownit rendering
+    assert.ok(
+      qfmt.includes("replaceHTMLElementsInString(el.innerHTML)"),
+      "applyRenderers must unescape innerHTML before passing to markdown-it"
+    );
+    assert.ok(
+      qfmt.includes('&quot;'),
+      "replaceHTMLElementsInString should unescape &quot; for HTML attributes"
+    );
+    assert.ok(
+      qfmt.includes('&lt;\\/span&gt;'),
+      "applyRenderers should repair escaped closing spans after markdown-it"
+    );
+  });
+
+  test("Template rendering pipeline successfully renders both HTML <img> and Markdown ![alt](src) images alongside KaTeX formulas", () => {
+    // Simulate the exact client-side runtime of CARD_TEMPLATES.markdown_basic
+    const qfmt = CARD_TEMPLATES.markdown_basic.qfmt;
+
+    // Extract helper functions from template
+    const scriptMatch = qfmt.match(/<script>([\s\S]*?)<\/script>/i);
+    assert.ok(scriptMatch, "Template must contain a client-side script block");
+    const scriptContent = scriptMatch[1];
+
+    // Create a sandbox to execute the template functions with markdownit & renderMathInElement present
+    // so the asynchronous initCards network loader is not triggered
+    const dummyFn = function () {};
+    const mockWindow: Record<string, any> = {
+      markdownit: dummyFn,
+      renderMathInElement: dummyFn,
+      renderAllFrontFields: dummyFn,
+    };
+    const mockDocument = {
+      querySelector: () => null,
+      querySelectorAll: () => [],
+      head: { appendChild: () => {} },
+      createElement: () => ({ setAttribute: () => {}, appendChild: () => {} }),
+    };
+    const executeTemplateScript = new Function(
+      "window",
+      "document",
+      "markdownit",
+      "renderMathInElement",
+      scriptContent
+    );
+    executeTemplateScript(mockWindow, mockDocument, dummyFn, dummyFn);
+
+    assert.equal(typeof mockWindow.replaceInString, "function");
+    assert.equal(typeof mockWindow.replaceHTMLElementsInString, "function");
+
+    // Test Case A: HTML <img> tag (as exported by Schedae default img_tag mode) with math
+    const inputWithHtmlImg =
+      "* **Interpretation:** Ein Verlauf unterhalb der Diagonale.<br>" +
+      "* **Korrektur:** Formel: \\<anki-mathjax>\\hat{y} = 1\\</anki-mathjax><br><br>" +
+      '<img alt="Wie man eine ROC-Kurve richtig interpretiert" src="interpreting-a-roc-curve.webp">';
+
+    const cleanedA = mockWindow.replaceInString(inputWithHtmlImg);
+    assert.ok(cleanedA.includes("$"), "MathJax tags must be converted to $ delimiters");
+    assert.ok(cleanedA.includes('<img alt="Wie man eine ROC-Kurve richtig interpretiert" src="interpreting-a-roc-curve.webp">'));
+
+    // Test Case B: Entity restoration prior to markdown-it
+    // Simulate DOM textContent conversion (turning < and > into entities)
+    const domEscaped = cleanedA
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+    
+    const unescapedForMarkdown = mockWindow.replaceHTMLElementsInString(domEscaped);
+    assert.ok(
+      unescapedForMarkdown.includes('<img alt="Wie man eine ROC-Kurve richtig interpretiert" src="interpreting-a-roc-curve.webp">'),
+      "HTML <img> tag must be fully restored before markdown-it processes it"
+    );
+    assert.ok(!unescapedForMarkdown.includes("&lt;img"), "Entities must not be passed to markdown-it");
+
+    // Test Case C: Markdown image syntax ![alt](src)
+    const inputWithMdImg =
+      "* **Interpretation:** Ein Verlauf.<br><br>" +
+      "![Wie man eine ROC-Kurve richtig interpretiert](interpreting-a-roc-curve.webp)";
+    const cleanedC = mockWindow.replaceInString(inputWithMdImg);
+    assert.ok(
+      cleanedC.includes("![Wie man eine ROC-Kurve richtig interpretiert](interpreting-a-roc-curve.webp)"),
+      "Markdown image syntax must be preserved through normalization"
+    );
+  });
+
+  test("preparePreviewContent normalizes HTML <img> tags, Markdown images, HTML formatting, and math for in-app preview", () => {
+    // 1. Raw HTML <img> tag with <br> and bold
+    const htmlInput =
+      "* **Interpretation:** Ein Verlauf unterhalb der Diagonale.<br>" +
+      "<img alt=\"ROC-Kurve\" src=\"interpreting-a-roc-curve.webp\"><br>" +
+      "Formula: <anki-mathjax>\\hat{y} = 1</anki-mathjax>";
+
+    const previewOut1 = preparePreviewContent(htmlInput);
+    assert.ok(
+      previewOut1.includes("![ROC-Kurve](interpreting-a-roc-curve.webp)"),
+      "HTML <img> tag must be converted to Markdown image syntax so ReactMarkdown components.img handles it"
+    );
+    assert.ok(previewOut1.includes("$\\hat{y} = 1$"), "MathJax tags must be normalized to KaTeX $...$");
+    assert.ok(!previewOut1.includes("<img"), "Raw <img> tag should be converted to avoid text-escaping");
+
+    // 2. Markdown image syntax is preserved
+    const mdInput = "Look at this:\n\n![My Diagram](my-diagram.png)\n\nFormula: $x < y$";
+    const previewOut2 = preparePreviewContent(mdInput);
+    assert.ok(previewOut2.includes("![My Diagram](my-diagram.png)"), "Markdown image syntax must be preserved");
+    assert.ok(previewOut2.includes("$x < y$"), "Math with < must be preserved");
+
+    // 3. HTML formatting (<b>, <i>, <br>) converted cleanly to Markdown
+    const formattedHtmlInput = "<b>Important:</b> check <i>carefully</i>.<br>Second line.";
+    const previewOut3 = preparePreviewContent(formattedHtmlInput);
+    assert.ok(previewOut3.includes("**Important:**"), "<b> must be converted to **bold**");
+    assert.ok(
+      previewOut3.includes("_carefully_") || previewOut3.includes("*carefully*"),
+      "<i> must be converted to Markdown emphasis (_carefully_ or *carefully*)"
+    );
+    assert.ok(previewOut3.includes("\n"), "<br> must be converted to standard newlines");
   });
 });

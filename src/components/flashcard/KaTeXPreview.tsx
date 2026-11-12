@@ -9,7 +9,8 @@ import { useWorkspaceMediaResolver, type MediaUrlResolver } from "@/components/w
 import { parseLocalMediaFilename } from "@/services/mediaStore/mediaUtils";
 
 import { normalizeMathMarkdown } from "@/utils/mathUtils";
-export { normalizeMathMarkdown };
+import { preparePreviewContent } from "@/utils/previewContent";
+export { normalizeMathMarkdown, preparePreviewContent };
 
 /**
  * Renders markdown text with full formatting support (bold, line breaks, lists)
@@ -26,7 +27,7 @@ export function KaTeXRenderer({
 }) {
   const contextResolver = useWorkspaceMediaResolver();
   const resolver = resolveMediaUrl ?? contextResolver;
-  const content = React.useMemo(() => normalizeMathMarkdown(dedentText(text)), [text]);
+  const content = React.useMemo(() => preparePreviewContent(text), [text]);
 
   return (
     <div className={cn("leading-relaxed max-w-none", className)}>

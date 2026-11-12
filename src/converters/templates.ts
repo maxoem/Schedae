@@ -100,6 +100,7 @@ const markdownBasicFront = `
             str = str.replace(/&tab;/gi, "	");
             str = str.replace(/&gt;/gi, ">");
             str = str.replace(/&lt;/gi, "<");
+            str = str.replace(/&quot;/gi, '"');
             return str.replace(/&amp;/gi, "&");
         };
 
@@ -128,7 +129,7 @@ const markdownBasicFront = `
 
             // 2. Markdown rendering (runs on el.innerHTML with KaTeX spans preserved)
             try {
-                let text = el.innerHTML;
+                let text = window.replaceHTMLElementsInString(el.innerHTML);
                 if (typeof markdownit !== "undefined") {
                     let md = new markdownit({
                         typographer: true, 
@@ -144,6 +145,7 @@ const markdownBasicFront = `
                         md = md.use(markdownItMark);
                     }
                     text = md.render(text);
+                    text = text.replace(/&lt;\\/span&gt;/gi, "\\\\");
                 } else {
                     text = text.replace(/\\n/g, "<br>");
                 }
