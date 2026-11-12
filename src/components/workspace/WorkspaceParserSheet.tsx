@@ -15,7 +15,7 @@ import { AiSettingsPanel, Toggle, AI_MODEL_PRESETS, useAiSettings } from "@/comp
 import { type SplitSettings } from "@/components/flashcard/SplitSettingsDialog";
 import type { AiModelPresetId } from "@/hooks/useDeckWorkspace";
 import { CARD_TEMPLATES, type CardTemplateId } from "@/converters/templates";
-import { resolveApkgModelConfig, type ExportMathFormat, type NoteTypeMode } from "@/converters/jsonToApkg";
+import { resolveApkgModelConfig, type ExportImageFormat, type ExportMathFormat, type NoteTypeMode } from "@/converters/jsonToApkg";
 import type { FlashCard } from "@/converters/types";
 import {
   SlidersHorizontal,
@@ -63,6 +63,8 @@ interface WorkspaceParserSheetProps {
   onCustomNoteTypeNameChange?: (name: string) => void;
   exportMathFormat?: ExportMathFormat;
   onExportMathFormatChange?: (format: ExportMathFormat) => void;
+  exportImageFormat?: ExportImageFormat;
+  onExportImageFormatChange?: (format: ExportImageFormat) => void;
   activeCards?: FlashCard[];
   // AI Heuristic support
   aiSettings: ReturnType<typeof useAiSettings>;
@@ -96,6 +98,8 @@ export function WorkspaceParserSheet({
   onCustomNoteTypeNameChange,
   exportMathFormat = "katex",
   onExportMathFormatChange,
+  exportImageFormat = "img_tag",
+  onExportImageFormatChange,
   activeCards = [],
   aiSettings,
   onDeriveStencil,
@@ -389,6 +393,51 @@ export function WorkspaceParserSheet({
                       />
                     )}
                   </div>
+
+                  {/* Image Reference Export Format Selector */}
+                  <div className="pt-3 mt-3 border-t border-zinc-200/60 flex items-start justify-between gap-3">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-semibold text-zinc-950">
+                          Export Images as HTML &lt;img&gt;
+                        </span>
+                        <Badge
+                          variant="secondary"
+                          className={cn(
+                            "text-[10px] py-0 px-1.5 font-mono border",
+                            exportImageFormat === "markdown"
+                              ? "bg-sky-50 text-sky-800 border-sky-200/80"
+                              : "bg-zinc-100 text-zinc-700 border-zinc-200/80"
+                          )}
+                        >
+                          {exportImageFormat === "markdown" ? "![alt](file)" : "<img src=\"file\">"}
+                        </Badge>
+                      </div>
+                      <p className="text-[11px] text-zinc-500 leading-relaxed">
+                        {exportImageFormat === "markdown" ? (
+                          <>
+                            Emits flat Markdown image syntax (
+                            <code className="bg-zinc-100 px-1 rounded font-mono text-zinc-800">![alt](filename)</code>
+                            ) for Markdown-aware templates.
+                          </>
+                        ) : (
+                          <>
+                            Default: converts pasted image links into native HTML{" "}
+                            <code className="bg-zinc-100 px-1 rounded font-mono text-zinc-800">&lt;img src=&quot;…&quot;&gt;</code>{" "}
+                            tags for Anki compatibility and Check Media tracking.
+                          </>
+                        )}
+                      </p>
+                    </div>
+                    {onExportImageFormatChange && (
+                      <Toggle
+                        checked={exportImageFormat === "img_tag"}
+                        onChange={(enabled) =>
+                          onExportImageFormatChange(enabled ? "img_tag" : "markdown")
+                        }
+                      />
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -543,6 +592,12 @@ export function WorkspaceParserSheet({
                       Math:{" "}
                       <code className="bg-white border border-zinc-200/80 px-1.5 py-0.5 rounded font-mono text-zinc-800">
                         {exportMathFormat === "anki_mathjax" ? "Anki MathJax (\\( / \\[)" : "KaTeX ($ / $$)"}
+                      </code>
+                    </span>
+                    <span>
+                      Images:{" "}
+                      <code className="bg-white border border-zinc-200/80 px-1.5 py-0.5 rounded font-mono text-zinc-800">
+                        {exportImageFormat === "markdown" ? "Markdown ![alt](file)" : "HTML <img src>"}
                       </code>
                     </span>
                   </div>

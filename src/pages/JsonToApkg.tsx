@@ -174,6 +174,13 @@ export default function JsonToApkg() {
                   workspace.setDeckName(cleanName);
                 }
               }}
+              mediaItems={workspace.mediaItems}
+              draftMediaFilenames={workspace.draftMediaFilenames}
+              batchMediaFilenames={workspace.batchMediaFilenames}
+              missingMediaFilenames={workspace.missingMediaFilenames}
+              onAttachMedia={workspace.attachMediaFiles}
+              onInsertMediaSnippet={workspace.insertMediaSnippet}
+              onRemoveMedia={workspace.removeMediaItem}
             />
           </div>
 
@@ -199,6 +206,7 @@ export default function JsonToApkg() {
               extractTopicBadges={workspace.extractTopicBadges}
               onBackToSource={() => setMobileActiveTab("source")}
               diagnostics={workspace.parseResult.diagnostics}
+              mediaUrlMap={workspace.mediaUrlMap}
             />
           </div>
         </main>
@@ -228,6 +236,8 @@ export default function JsonToApkg() {
           onCustomNoteTypeNameChange={workspace.setCustomNoteTypeName}
           exportMathFormat={workspace.exportMathFormat}
           onExportMathFormatChange={workspace.setExportMathFormat}
+          exportImageFormat={workspace.exportImageFormat}
+          onExportImageFormatChange={workspace.setExportImageFormat}
           activeCards={workspace.activeCards}
           aiSettings={ai}
           onDeriveStencil={handleAnalyzeStructure}

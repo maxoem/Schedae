@@ -223,4 +223,27 @@ describe("Markdown & KaTeX Template Rendering", () => {
     const normDouble = normalizeMathMarkdown(doubleEscaped);
     assert.equal(normDouble, "Erfahrung $E$ bezüglich");
   });
+
+  test("formatMarkdownForAnki exports images as HTML <img> tags or flat Markdown references based on imageFormat", () => {
+    const input =
+      "Look at ![Diagram \"A\"](media/schedae-a1b2c3_test.png)\n" +
+      "Code sample: `![code](media/ignore_me.png)`\n" +
+      "```\n![block](media/ignore_block.png)\n```";
+
+    const htmlOut = formatMarkdownForAnki(input, { imageFormat: "img_tag" });
+    assert.ok(
+      htmlOut.includes('<img src="schedae-a1b2c3_test.png" alt="Diagram &quot;A&quot;">'),
+      "img_tag mode must emit escaped HTML <img> with flat filename",
+    );
+    assert.ok(htmlOut.includes("`![code](media/ignore_me.png)`"), "Inline code image example must remain untouched");
+    assert.ok(htmlOut.includes("![block](media/ignore_block.png)"), "Fenced code image example must remain untouched");
+
+    const mdOut = formatMarkdownForAnki(input, { imageFormat: "markdown" });
+    assert.ok(
+      mdOut.includes('![Diagram "A"](schedae-a1b2c3_test.png)'),
+      "markdown mode must emit flat ![alt](filename) syntax",
+    );
+    assert.ok(!mdOut.includes("media/schedae-a1b2c3_test.png"), "markdown mode must strip virtual media/ prefix");
+    assert.ok(mdOut.includes("`![code](media/ignore_me.png)`"));
+  });
 });

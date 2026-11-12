@@ -1,4 +1,4 @@
-import { useRef, useCallback, useMemo } from "react";
+import { useRef, useCallback, useMemo, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import type { ParserRuleId } from "@/hooks/useDeckWorkspace";
 import { computeMarkdownHighlights, isJsonInput, PASTEL_PALETTES } from "./markdownHighlighter";
@@ -77,6 +77,9 @@ export interface SyntaxEditorProps {
   onPasteFromClipboard?: () => void;
   onLoadSample?: () => void;
   onCopyFormatPrompt?: () => void;
+  onImagePaste?: (files: File[], selectionStart: number, selectionEnd: number) => void;
+  cursorRequest?: { pos: number; seq: number } | null;
+  onSelectionChange?: (selectionStart: number, selectionEnd: number) => void;
 }
 
 export default function SyntaxEditor({
@@ -91,10 +94,20 @@ export default function SyntaxEditor({
   onPasteFromClipboard,
   onLoadSample,
   onCopyFormatPrompt,
+  onImagePaste,
+  cursorRequest,
+  onSelectionChange,
 }: SyntaxEditorProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const lineNumbersRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!cursorRequest || !textareaRef.current) return;
+    const tx = textareaRef.current;
+    tx.focus();
+    tx.setSelectionRange(cursorRequest.pos, cursorRequest.pos);
+  }, [cursorRequest]);
 
   // Determine line count: when value is empty, display line numbers for the placeholder lines (minimum 8 lines)
   const placeholderLineCount = useMemo(() => {
@@ -218,6 +231,48 @@ export default function SyntaxEditor({
     [shortcuts],
   );
 
+  // intercept image clipboard pastes cleanly while keeping text paste default
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      if (!onImagePaste || !e.clipboardData) return;
+
+      const imageFiles: File[] = [];
+      if (e.clipboardData.items && e.clipboardData.items.length > 0) {
+        for (const item of Array.from(e.clipboardData.items)) {
+          if (item.kind === "file" && item.type.startsWith("image/")) {
+            const file = item.getAsFile();
+            if (file) imageFiles.push(file);
+          }
+        }
+      } else if (e.clipboardData.files && e.clipboardData.files.length > 0) {
+        for (const file of Array.from(e.clipboardData.files)) {
+          if (file.type.startsWith("image/")) {
+            imageFiles.push(file);
+          }
+        }
+      }
+
+      if (imageFiles.length === 0) return;
+
+      const plainText = e.clipboardData.getData("text/plain").trim();
+      const firstImageName = imageFiles[0]?.name?.trim() ?? "";
+      if (!plainText || (firstImageName && plainText === firstImageName)) {
+        e.preventDefault();
+        const tx = textareaRef.current;
+        const start = tx?.selectionStart ?? value.length;
+        const end = tx?.selectionEnd ?? value.length;
+        onImagePaste(imageFiles, start, end);
+      }
+    },
+    [onImagePaste, value.length],
+  );
+
+  const reportSelection = useCallback(() => {
+    const tx = textareaRef.current;
+    if (!tx || !onSelectionChange) return;
+    onSelectionChange(tx.selectionStart ?? value.length, tx.selectionEnd ?? value.length);
+  }, [onSelectionChange, value.length]);
+
   // render overlay with highlighted segments
   const overlayContent = useMemo(() => {
     if (value.length === 0 && placeholder) {
@@ -279,7 +334,14 @@ export default function SyntaxEditor({
         <textarea
           ref={textareaRef}
           value={value}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => {
+            onChange(e.target.value);
+            onSelectionChange?.(e.target.selectionStart ?? e.target.value.length, e.target.selectionEnd ?? e.target.value.length);
+          }}
+          onSelect={reportSelection}
+          onClick={reportSelection}
+          onKeyUp={reportSelection}
+          onPaste={handlePaste}
           onScroll={handleScroll}
           onKeyDown={handleKeyDown}
           disabled={disabled}

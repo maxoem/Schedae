@@ -1,0 +1,21 @@
+{
+  "cardCount": 2,
+  "detectedFormat": "markdown-sections",
+  "usedStrategyId": "markdown-sections",
+  "cards": [
+    {
+      "id": "card-1",
+      "front": "Which anatomical structure is highlighted in the scan below?\n\n![Brain MRI slice](media/schedae-a1b2c3d4e5f6.png)",
+      "back": "The **hippocampus**, which is critical for consolidating short-term memory into long-term declarative memory.\n\nMathematical recall decay model: $R(t) = e^{-t / S}$\n\n![Hippocampus label](media/schedae-001122334455.jpg)",
+      "customFields": {
+        "Notes": "Pay attention to the sagittal plane shown in ![Sagittal reference](media/schedae-998877665544.webp).",
+        "Quelle": "Neuroanatomy Atlas, Ch. 4"
+      }
+    },
+    {
+      "id": "card-2",
+      "front": "Identify the components of the Transformer architecture.",
+      "back": "* **Self-Attention:** Computes pairwise token weights via $\\text{softmax}\\!\\left(\\frac{QK^T}{\\sqrt{d_k}}\\right)V$.\n* **Architecture Diagram:** ![Transformer block](media/schedae-f1e2d3c4b5a6.png)\n* **Syntax Example:** Keep literal code untouched: `![example](media/schedae-ignored.png)`"
+    }
+  ]
+}

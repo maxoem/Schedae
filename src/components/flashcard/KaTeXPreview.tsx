@@ -5,6 +5,8 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
+import { useWorkspaceMediaResolver, type MediaUrlResolver } from "@/components/workspace/workspaceMediaContextValue";
+import { parseLocalMediaFilename } from "@/services/mediaStore/mediaUtils";
 
 import { normalizeMathMarkdown } from "@/utils/mathUtils";
 export { normalizeMathMarkdown };
@@ -16,10 +18,14 @@ export { normalizeMathMarkdown };
 export function KaTeXRenderer({
   text,
   className,
+  resolveMediaUrl,
 }: {
   text: string;
   className?: string;
+  resolveMediaUrl?: MediaUrlResolver;
 }) {
+  const contextResolver = useWorkspaceMediaResolver();
+  const resolver = resolveMediaUrl ?? contextResolver;
   const content = React.useMemo(() => normalizeMathMarkdown(dedentText(text)), [text]);
 
   return (
@@ -37,6 +43,26 @@ export function KaTeXRenderer({
           blockquote: ({ children }) => (
             <blockquote className="border-l-4 border-muted-foreground/30 pl-3 italic my-2">{children}</blockquote>
           ),
+          img: ({ src = "", alt = "", title }) => {
+            const resolved = resolver?.(src);
+            const localName = parseLocalMediaFilename(src);
+            if (localName && !resolved) {
+              return (
+                <span className="inline-flex items-center gap-1.5 px-2 py-1 my-1 rounded-md border border-amber-300/70 bg-amber-50 text-amber-800 text-[11px] font-mono">
+                  Missing media: {localName}
+                </span>
+              );
+            }
+            return (
+              <img
+                src={resolved ?? src}
+                alt={alt}
+                title={title}
+                loading="lazy"
+                className="max-w-full h-auto rounded-md my-2 border border-border/50"
+              />
+            );
+          },
         }}
       >
         {content}

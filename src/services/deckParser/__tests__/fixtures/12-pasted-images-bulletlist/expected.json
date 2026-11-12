@@ -1,0 +1,20 @@
+{
+  "cardCount": 2,
+  "detectedFormat": "markdown-sections",
+  "usedStrategyId": "key-value",
+  "cards": [
+    {
+      "id": "card-1",
+      "front": "Was zeigt das folgende Verlustlandschafts-Diagramm?\n\n![Loss surface](media/schedae-112233445566.png)",
+      "back": "Konvergenz zu einem lokalen Minimum entlang des negativen Gradienten $-\\nabla L(\\theta)$:\n  * ![Convergence path](media/schedae-aabbccddeeff.png)"
+    },
+    {
+      "id": "card-2",
+      "front": "Wie wirkt ein $3 \\times 3$ Sobel-Filter auf ein Graustufenbild?",
+      "back": "Er berechnet diskrete Kantengradienten in $x$- und $y$-Richtung.",
+      "customFields": {
+        "Notes": "Referenz-Abbildung ![Sobel kernel](media/schedae-fedcba654321.webp)"
+      }
+    }
+  ]
+}
