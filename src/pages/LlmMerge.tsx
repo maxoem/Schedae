@@ -1,6 +1,6 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { useLocation, useNavigate, Link } from "react-router-dom";
-import { ArrowLeft, Braces, Save, Sparkles, BookOpen, Upload, Layers } from "lucide-react";
+import { ArrowLeft, Braces, Save, Sparkles, BookOpen, Upload, Layers, AlertTriangle, AlertCircle } from "lucide-react";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -15,16 +15,38 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import JSZip from "jszip";
+import {
+  DEFAULT_LLM_MARKDOWN_FIELDS,
+  evaluateLlmMergeCapability,
+  mergeLlmMarkdownIntoDeck,
+  type LlmMarkdownFieldSelection,
+  type LlmMergeStats,
+} from "@/services/llmMarkdown";
+
+const INITIAL_STATS: LlmMergeStats = {
+  updated: 0,
+  partialUpdated: 0,
+  deleted: 0,
+  unmodified: 0,
+  blocksMissingId: 0,
+};
 
 export default function LlmMerge() {
   const location = useLocation();
   const navigate = useNavigate();
-  
+
   const originalJson = location.state?.originalJson || null;
   const deckName = location.state?.deckName || "deck.apkg";
+  const exportedFields: LlmMarkdownFieldSelection =
+    location.state?.exportedFields || DEFAULT_LLM_MARKDOWN_FIELDS;
+  const mergeCapability = useMemo(
+    () => evaluateLlmMergeCapability(exportedFields),
+    [exportedFields],
+  );
+
   const [llmMarkdown, setLlmMarkdown] = useState<string>("");
   const [mergedJson, setMergedJson] = useState<any>(null);
-  const [stats, setStats] = useState({ updated: 0, deleted: 0, unmodified: 0 });
+  const [stats, setStats] = useState<LlmMergeStats>(INITIAL_STATS);
 
   const handleFileUpload = async (file: File) => {
     try {
@@ -68,102 +90,14 @@ export default function LlmMerge() {
   useEffect(() => {
     if (!originalJson || !llmMarkdown.trim()) {
       setMergedJson(null);
-      setStats({ updated: 0, deleted: 0, unmodified: 0 });
+      setStats(INITIAL_STATS);
       return;
     }
 
     try {
-      // 1. Parsing the Markdown blocks string
-      // Format is:
-      // ### <DeckId>:<CardId> (or just <CardId>)
-      // Q: <front>
-      // A: <back>
-      // ---
-
-      // Note: [DELETE] can be used to skip the card.
-      
-      const blocks = llmMarkdown.split('---').map(s => s.trim()).filter(Boolean);
-      const updatesMap = new Map<number | string, { action: 'update' | 'delete', front?: string, back?: string }>();
-
-      blocks.forEach(block => {
-        const lines = block.split('\n');
-        const headerLine = lines.find(l => l.startsWith('###'));
-        if (!headerLine) return;
-        
-        // Extract note ID. Header might be "### deckId:noteId" or "### noteId"
-        const idMatch = headerLine.match(/###\s*(?:[^:\s]+:)?([^\s]+)/);
-        const noteId = idMatch ? idMatch[1] : null;
-        if (!noteId || noteId === 'unknown') return;
-
-        const isDelete = block.includes('[DELETE]');
-        
-        if (isDelete) {
-          updatesMap.set(noteId, { action: 'delete' });
-        } else {
-          // Extract Q and A
-          const qIndex = block.indexOf('Q:');
-          const aIndex = block.indexOf('A:');
-          
-          if (qIndex !== -1 && aIndex !== -1 && qIndex < aIndex) {
-            const front = block.slice(qIndex + 2, aIndex).trim();
-            const back = block.slice(aIndex + 2).trim();
-            updatesMap.set(noteId, { action: 'update', front, back });
-          }
-        }
-      });
-
-      // 2. Merging the changes into the JSON
-      // Clone original JSON to avoid mutating state
-      const merged = JSON.parse(JSON.stringify(originalJson));
-      let cUpdated = 0;
-      let cDeleted = 0;
-      let cUnmodified = 0;
-
-      const processNotesArray = (notesArray: any[]) => {
-        const result = [];
-        for (const note of notesArray) {
-          const noteStrId = String(note.id);
-          if (updatesMap.has(noteStrId)) {
-            const update = updatesMap.get(noteStrId)!;
-            if (update.action === 'delete') {
-              cDeleted++;
-              continue; // Exclude from result
-            } else if (update.action === 'update') {
-              cUpdated++;
-              // Merge changes
-              note.front = update.front;
-              note.back = update.back;
-              
-              // Note: Ideally we update note.flds as well based on the new front and back using 0x1f
-              // However, typically re-importers look at front/back mapping
-              if (note.flds) {
-                const parts = note.flds.split('\x1f');
-                parts[0] = update.front;
-                parts[1] = update.back;
-                note.flds = parts.join('\x1f');
-              }
-            }
-          } else {
-            cUnmodified++;
-          }
-          result.push(note);
-        }
-        return result;
-      };
-
-      if (Array.isArray(merged.notes)) {
-        merged.notes = processNotesArray(merged.notes);
-      } else if (merged?.decks?.byId) {
-        Object.keys(merged.decks.byId).forEach(deckId => {
-          const deck = merged.decks.byId[deckId];
-          if (Array.isArray(deck.notes)) {
-            deck.notes = processNotesArray(deck.notes);
-          }
-        });
-      }
-
-      setMergedJson(merged);
-      setStats({ updated: cUpdated, deleted: cDeleted, unmodified: cUnmodified });
+      const result = mergeLlmMarkdownIntoDeck(originalJson, llmMarkdown);
+      setMergedJson(result.mergedJson);
+      setStats(result.stats);
     } catch (e) {
       console.error("Error during merge", e);
     }
@@ -234,11 +168,22 @@ export default function LlmMerge() {
               ### ID
             </Badge>
             <Badge variant="outline" className="text-xs leading-none py-1">
-              Q: / A:
+              {exportedFields.question && exportedFields.answer
+                ? "Q: / A:"
+                : exportedFields.question
+                  ? "Q: only (Answers preserved)"
+                  : exportedFields.answer
+                    ? "A: only (Questions preserved)"
+                    : "Q: / A:"}
             </Badge>
             <Badge variant="outline" className="text-xs leading-none py-1">
               --- Separator
             </Badge>
+            {mergeCapability.status === "partial" && (
+              <Badge variant="outline" className="text-xs leading-none py-1 border-amber-300 bg-amber-50 text-amber-800 gap-1">
+                <AlertTriangle className="w-3 h-3" /> Partial Merge
+              </Badge>
+            )}
             <div className="flex-1" />
             <Badge variant="secondary" className="text-xs leading-none py-1">
               {deckName}
@@ -311,10 +256,19 @@ export default function LlmMerge() {
                 )}
               </div>
 
-              <div className="px-4 py-2 border-b bg-muted/20 text-xs text-muted-foreground shrink-0 flex gap-3 flex-wrap">
+              <div className="px-4 py-2 border-b bg-muted/20 text-xs text-muted-foreground shrink-0 flex gap-3 flex-wrap items-center">
                 <span className="text-emerald-700 font-medium">{stats.updated} updated</span>
+                {stats.partialUpdated > 0 && (
+                  <span className="text-amber-700 font-medium">({stats.partialUpdated} partial)</span>
+                )}
                 <span className="text-red-700 font-medium">{stats.deleted} deleted</span>
                 <span className="text-zinc-600 font-medium">{stats.unmodified} unmodified</span>
+                {stats.blocksMissingId > 0 && (
+                  <span className="inline-flex items-center gap-1 text-destructive font-medium">
+                    <AlertCircle className="w-3.5 h-3.5" />
+                    {stats.blocksMissingId} block{stats.blocksMissingId === 1 ? "" : "s"} missing ### ID (skipped)
+                  </span>
+                )}
               </div>
 
               <Card className="flex-1 rounded-none border-0 shadow-none bg-background/50 min-h-0 relative">
