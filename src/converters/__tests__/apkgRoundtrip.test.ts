@@ -150,4 +150,55 @@ describe("APKG Binary Round-Trip Verification", () => {
     const rawDirect = await decodeApkgRaw(await directPlain.arrayBuffer(), "reduced");
     assert.equal(modelIds[0], Object.keys(rawDirect.models)[0]);
   });
+
+  test("default APKG export emits plain KaTeX ($ / $$) and prevents Anki MathJax conversion or stray backslashes", async () => {
+    const cardsWithMixedMath: FlashCard[] = [
+      {
+        front: "Erkläre IoU und WER.",
+        back:
+          "* **Intersection over Union (IoU):** Quotient:\n" +
+          "  \\\\[\\text{IoU} = \\frac{|A \\cap B|}{|A \\cup B|}\\\\]\n" +
+          "* **Word Error Rate (WER):** Deletionen (\\\\(D\\\\)) und Insertionen (\\\\(I\\\\)):\n" +
+          "$$\n" +
+          "\\text{WER} = \\frac{S + D + I}{N}\n" +
+          "$$\n" +
+          "Inline $E = mc^2$.",
+      },
+    ];
+
+    // Default (KaTeX) export
+    const katexBlob = await createApkg(cardsWithMixedMath, "KaTeX Default", "markdown_basic");
+    const katexRaw = await decodeApkgRaw(await katexBlob.arrayBuffer(), "reduced", ["front", "back"]);
+    const katexDeck = Object.values(
+      katexRaw.decks.byId as Record<string, { notes?: Array<{ back: string }> }>,
+    ).find((d) => Array.isArray(d.notes) && d.notes.length > 0);
+    assert.ok(katexDeck?.notes?.[0], "Decoded KaTeX deck must contain exported notes");
+    const katexBack = katexDeck.notes[0].back;
+
+    assert.ok(katexBack.includes("$$\\text{IoU} = \\frac{|A \\cap B|}{|A \\cup B|}$$"));
+    assert.ok(katexBack.includes("Deletionen ($D$) und Insertionen ($I$):"));
+    assert.ok(katexBack.includes("$$\n\\text{WER} = \\frac{S + D + I}{N}\n$$"));
+    assert.ok(katexBack.includes("Inline $E = mc^2$."));
+    assert.ok(!katexBack.includes("<anki-mathjax"), "Default export must never emit <anki-mathjax>");
+    assert.ok(!katexBack.includes("\\["), "Default export must not emit \\[ delimiters");
+    assert.ok(!katexBack.includes("\\("), "Default export must not emit \\( delimiters");
+
+    // Opt-in Anki MathJax export
+    const mathjaxBlob = await createApkg(cardsWithMixedMath, "MathJax Opt-in", "default", undefined, {
+      mathFormat: "anki_mathjax",
+    });
+    const mathjaxRaw = await decodeApkgRaw(await mathjaxBlob.arrayBuffer(), "reduced", ["front", "back"]);
+    const mathjaxDeck = Object.values(
+      mathjaxRaw.decks.byId as Record<string, { notes?: Array<{ back: string }> }>,
+    ).find((d) => Array.isArray(d.notes) && d.notes.length > 0);
+    assert.ok(mathjaxDeck?.notes?.[0], "Decoded MathJax deck must contain exported notes");
+    const mathjaxBack = mathjaxDeck.notes[0].back;
+
+    assert.ok(mathjaxBack.includes("\\[\\text{IoU} = \\frac{|A \\cap B|}{|A \\cup B|}\\]"));
+    assert.ok(mathjaxBack.includes("Deletionen (\\(D\\)) und Insertionen (\\(I\\)):"));
+    assert.ok(mathjaxBack.includes("\\[\n\\text{WER} = \\frac{S + D + I}{N}\n\\]"));
+    assert.ok(mathjaxBack.includes("Inline \\(E = mc^2\\)."));
+    assert.ok(!mathjaxBack.includes("\\\\["), "Opt-in MathJax must not emit double backslashes");
+    assert.ok(!mathjaxBack.includes("\\\\("), "Opt-in MathJax must not emit double backslashes");
+  });
 });

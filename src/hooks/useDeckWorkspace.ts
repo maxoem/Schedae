@@ -12,7 +12,7 @@ import { DeckParserService } from "@/services/deckParser/deckParserService";
 import type { DeckParseResult } from "@/services/deckParser/types";
 import { WORKSPACE_SAMPLES } from "@/services/deckParser/sampleData";
 import type { Stencil } from "@/lib/extraction/types";
-import { createApkg, type NoteTypeMode } from "@/converters/jsonToApkg";
+import { createApkg, type ExportMathFormat, type NoteTypeMode } from "@/converters/jsonToApkg";
 
 export type AiModelPresetId = "auto" | "gemini" | "chatgpt" | "claude";
 export type ParserRuleId = "auto" | "generic" | "headings" | "bold-italic" | "custom";
@@ -33,6 +33,7 @@ const STORAGE_KEYS = {
   TEMPLATE: "schedae-workspace-template",
   NOTE_TYPE_MODE: "schedae-workspace-note-type-mode",
   CUSTOM_NOTE_TYPE_NAME: "schedae-workspace-custom-note-type-name",
+  MATH_FORMAT: "schedae-workspace-math-format",
   MODEL: "schedae-workspace-model",
   VIEW_MODE: "schedae-workspace-view-mode",
   BUILDER_BATCHES: "schedae-workspace-builder-batches",
@@ -76,6 +77,11 @@ export function useDeckWorkspace(aiStencil?: Stencil | null) {
 
   const [customNoteTypeName, setCustomNoteTypeName] = useState<string>(() => {
     return localStorage.getItem(STORAGE_KEYS.CUSTOM_NOTE_TYPE_NAME) || "";
+  });
+
+  const [exportMathFormat, setExportMathFormat] = useState<ExportMathFormat>(() => {
+    const saved = localStorage.getItem(STORAGE_KEYS.MATH_FORMAT);
+    return saved === "anki_mathjax" ? "anki_mathjax" : "katex";
   });
 
   const [selectedModel, setSelectedModel] = useState<AiModelPresetId>(() => {
@@ -218,6 +224,10 @@ export function useDeckWorkspace(aiStencil?: Stencil | null) {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.CUSTOM_NOTE_TYPE_NAME, customNoteTypeName);
   }, [customNoteTypeName]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.MATH_FORMAT, exportMathFormat);
+  }, [exportMathFormat]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.MODEL, selectedModel);
@@ -371,6 +381,7 @@ export function useDeckWorkspace(aiStencil?: Stencil | null) {
       const blob = await createApkg(cardsToExport, resolvedDeckName, selectedTemplate, deckCss, {
         noteTypeMode,
         customNoteTypeName,
+        mathFormat: exportMathFormat,
       });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -383,7 +394,7 @@ export function useDeckWorkspace(aiStencil?: Stencil | null) {
     } finally {
       setIsProcessing(false);
     }
-  }, [deckCards, draftCards, deckName, selectedTemplate, deckCss, noteTypeMode, customNoteTypeName]);
+  }, [deckCards, draftCards, deckName, selectedTemplate, deckCss, noteTypeMode, customNoteTypeName, exportMathFormat]);
 
   return {
     sourceText,
@@ -401,6 +412,8 @@ export function useDeckWorkspace(aiStencil?: Stencil | null) {
     setNoteTypeMode,
     customNoteTypeName,
     setCustomNoteTypeName,
+    exportMathFormat,
+    setExportMathFormat,
     selectedModel,
     setSelectedModel,
     parserRule,

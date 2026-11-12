@@ -226,6 +226,8 @@ export default function JsonToApkg() {
           onNoteTypeModeChange={workspace.setNoteTypeMode}
           customNoteTypeName={workspace.customNoteTypeName}
           onCustomNoteTypeNameChange={workspace.setCustomNoteTypeName}
+          exportMathFormat={workspace.exportMathFormat}
+          onExportMathFormatChange={workspace.setExportMathFormat}
           activeCards={workspace.activeCards}
           aiSettings={ai}
           onDeriveStencil={handleAnalyzeStructure}

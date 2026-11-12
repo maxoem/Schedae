@@ -69,9 +69,13 @@ const markdownBasicFront = `
         window.replaceInString = function(str) {
             if (!str) return "";
 
-            // Convert Anki's native MathJax tags (handles block="1", inline, and stray backslashes)
-            str = str.replace(/\\\\?<anki-mathjax[^>]*?block=["']?1["']?[^>]*>([\\s\\S]*?)\\\\?<\\/anki-mathjax>/gi, "\\\\[$1\\\\]");
-            str = str.replace(/\\\\?<anki-mathjax[^>]*>([\\s\\S]*?)\\\\?<\\/anki-mathjax>/gi, "\\\\($1\\\\)");
+            // Convert Anki's native MathJax tags (handles block="1", block="true", bare block, inline, and stray backslashes)
+            str = str.replace(/\\\\?<anki-mathjax\\b[^>]*?\\bblock(?:\\s*=\\s*["']?(?:1|true)["']?)?(?=[\\s>])[^>]*>([\\s\\S]*?)\\\\?<\\/anki-mathjax>/gi, function(_, m) {
+                return "\\n\\n$$" + m.trim() + "$$\\n\\n";
+            });
+            str = str.replace(/\\\\?<anki-mathjax\\b[^>]*>([\\s\\S]*?)\\\\?<\\/anki-mathjax>/gi, function(_, m) {
+                return "$" + m.trim() + "$";
+            });
 
             // Normalize double-escaped math delimiters: \\( -> \(, \\[ -> \[, \\) -> \), \\] -> \]
             str = str.replace(/\\\\\\\\+([(\[])/g, "\\\\$1");

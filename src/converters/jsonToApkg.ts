@@ -1,6 +1,13 @@
 import JSZip from "jszip";
 import type { FlashCard } from "./types";
 import { CARD_TEMPLATES, type CardTemplateId } from "./templates";
+import {
+  formatMathForTarget,
+  type ExportMathFormat,
+  type MathFormatMode,
+} from "@/utils/mathUtils";
+
+export type { ExportMathFormat, MathFormatMode };
 
 const APKG_SCHEMA = `
 CREATE TABLE col (
@@ -456,18 +463,41 @@ function buildModelFromFieldCount(
   );
 }
 
+export interface CreateApkgExportOptions extends CreateApkgModelOptions {
+  /**
+   * Target math delimiter format for exported Anki note fields:
+   * - "katex" (default): Normalizes math syntax (`\(...\)`, `\[...\]`, `<anki-mathjax>`, etc.)
+   *   into plain `$...$` and `$$...$$` for KaTeX templates without triggering Anki MathJax conversion.
+   * - "anki_mathjax": Opt-in conversion of math into clean native Anki MathJax (`\(...\)` and `\[...\]`).
+   */
+  mathFormat?: ExportMathFormat;
+}
+
+export interface FormatMarkdownForAnkiOptions {
+  /**
+   * Target math delimiter format for Anki note fields (default: "katex").
+   * Pass "preserve" to leave existing math delimiters unchanged.
+   */
+  mathFormat?: MathFormatMode;
+}
+
 /**
  * Formats and normalizes markdown content for storage in Anki note fields (flds).
  * Ensures that:
  * 1. Line endings are normalized and trailing whitespace on lines is stripped.
- * 2. Raw HTML <br> tags immediately preceding list markers are normalized to standard newlines.
- * 3. Accidental single-space indentations before top-level list markers (*, -, +, 1.)
+ * 2. Raw HTML <br> tags are normalized to standard newlines before formatting.
+ * 3. Math expressions are formatted for the target renderer ("katex" by default, or opt-in "anki_mathjax").
+ * 4. Accidental single-space indentations before top-level list markers (*, -, +, 1.)
  *    are removed so Markdown-it does not misclassify them as nested sub-bullets.
- * 4. Paragraph and list newlines are converted to <br> for Anki editor compatibility,
- *    without introducing stray spaces after <br>.
+ * 5. Paragraph and list newlines are converted to <br> for Anki editor compatibility,
+ *    without corrupting multi-line math blocks or code blocks.
  */
-export function formatMarkdownForAnki(content: string): string {
+export function formatMarkdownForAnki(
+  content: string,
+  options?: FormatMarkdownForAnkiOptions,
+): string {
   if (!content) return "";
+  const mathFormat: MathFormatMode = options?.mathFormat ?? "katex";
   let str = content;
 
   // 1. Normalize line endings
@@ -483,6 +513,9 @@ export function formatMarkdownForAnki(content: string): string {
   str = str.replace(/\\begin\{([a-zA-Z]+)\\\*\}/gi, "\\begin{$1*}");
   str = str.replace(/\\end\{([a-zA-Z]+)\\\*\}/gi, "\\end{$1*}");
 
+  // 5. Normalize or convert math expressions according to the target export format
+  str = formatMathForTarget(str, mathFormat);
+
   // Protect math formulas and code blocks so that internal newlines in LaTeX matrices,
   // bracketed display math, or aligned equations are never corrupted with <br> or backslash removals
   const placeholders: string[] = [];
@@ -492,38 +525,41 @@ export function formatMarkdownForAnki(content: string): string {
     return `XPROTECTEDCHUNK${idx}X`;
   };
 
-  // Step A: Protect existing delimited blocks and code blocks
+  // Step A: Protect existing delimited blocks, inline code, and fenced code blocks
   str = str.replace(/```[\s\S]*?```/g, protect);
+  str = str.replace(/`[^`\n]+`/g, protect);
   str = str.replace(/\$\$[\s\S]*?\$\$/g, protect);
   str = str.replace(/\\{1,2}\[[\s\S]*?\\{1,2}\]/g, protect);
   str = str.replace(/\\{1,2}\([^\n]*?\\{1,2}\)/g, protect);
   str = str.replace(/\\?<anki-mathjax[^>]*>[\s\S]*?\\?<\/anki-mathjax>/gi, protect);
   str = str.replace(/\$[^$\n]+?\$/g, protect);
 
-  // Step B: Wrap any remaining bare LaTeX display environments in display math ($$...$$).
-  // Because all existing math delimiters ($$, \[, \(, <anki-mathjax>, $) and code blocks are
-  // already replaced with placeholders, any \begin{...}...\end{\1} matched here is strictly bare.
+  // Step B: Wrap any remaining bare LaTeX display environments (only reachable in "preserve" mode).
   const BARE_ENV_REGEX =
     /\\begin\{(align\*?|alignat\*?|equation\*?|gather\*?|multline\*?|flalign\*?|split|pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix|matrix|cases|dcases|rcases|drcases|aligned|alignedat\*?|gathered|array|CD)\}([\s\S]*?)\\end\{\1\}/gi;
 
   str = str.replace(BARE_ENV_REGEX, (match) => {
-    return protect(`$$\n${match.trim()}\n$$`);
+    const trimmed = match.trim();
+    return protect(
+      mathFormat === "anki_mathjax" ? `\\[\n${trimmed}\n\\]` : `$$\n${trimmed}\n$$`,
+    );
   });
 
   // Step C: Protect any remaining generic \begin{...}...\end{...} environments so their contents are preserved
   str = str.replace(/\\begin\{([a-zA-Z*]+)\}[\s\S]*?\\end\{\1\}/gi, protect);
 
-  // 5. Clean up stray backslash lines and trailing backslashes outside math
+  // 6. Clean up stray backslash lines and trailing backslashes outside math
   str = str.replace(/(^|\n)\s*\\+\s*(?=\n|$)/g, "$1");
   str = str.replace(/([^\\])\\+[ \t]*(?=\n|$)/g, "$1");
 
-  // 6. Normalize accidental single-space indentation before list markers (leaves 2+ spaces / tabs intact)
+  // 7. Normalize accidental single-space indentation before list markers (leaves 2+ spaces / tabs intact)
   str = str.replace(/(^|\n) ([*+-]|\d+\.) /g, "$1$2 ");
 
-  // 7. Normalize multiple blank lines to clean double newlines
+  // 8. Normalize multiple blank lines to clean double newlines and trim outer blank lines
   str = str.replace(/\n{3,}/g, "\n\n");
+  str = str.replace(/^\n+|\n+$/g, "");
 
-  // 8. Convert newlines to Anki HTML breaks (<br>)
+  // 9. Convert newlines to Anki HTML breaks (<br>)
   str = str.replace(/\n/g, "<br>");
 
   // Restore protected chunks
@@ -543,6 +579,11 @@ export interface CreateApkgOptions extends CreateApkgModelOptions {
    * creating duplicates, and preserving 100% of scheduling history and FSRS states.
    */
   regenerateIds?: boolean;
+  /**
+   * Target math delimiter format for exported Anki note fields (default: "katex").
+   * Pass "preserve" to keep existing delimiters unchanged (e.g. when remaster math normalization is off).
+   */
+  mathFormat?: MathFormatMode;
 }
 
 async function initSqlJsInstance() {
@@ -862,25 +903,27 @@ export async function createApkgFromAnkiJson(
     JSON.stringify(modelsObj),
   ]);
 
+  const mathFormat: MathFormatMode = options?.mathFormat ?? "katex";
+
   for (const entry of noteEntries) {
     const note = entry.note ?? {};
 
     const frontRaw = typeof note.front === "string" ? note.front : "";
     const backRaw = typeof note.back === "string" ? note.back : "";
-    const frontHTML = formatMarkdownForAnki(frontRaw);
-    const backHTML = formatMarkdownForAnki(backRaw);
+    const frontHTML = formatMarkdownForAnki(frontRaw, { mathFormat });
+    const backHTML = formatMarkdownForAnki(backRaw, { mathFormat });
     let flds = `${frontHTML}\x1f${backHTML}`;
     if (typeof note.flds === "string" && note.flds.length) {
       const parts = note.flds.split("\x1f");
       if (parts.length >= 2) {
-        parts[0] = frontRaw ? frontHTML : formatMarkdownForAnki(parts[0]);
-        parts[1] = backRaw ? backHTML : formatMarkdownForAnki(parts[1]);
+        parts[0] = frontRaw ? frontHTML : formatMarkdownForAnki(parts[0], { mathFormat });
+        parts[1] = backRaw ? backHTML : formatMarkdownForAnki(parts[1], { mathFormat });
         for (let pIdx = 2; pIdx < parts.length; pIdx++) {
-          parts[pIdx] = formatMarkdownForAnki(parts[pIdx]);
+          parts[pIdx] = formatMarkdownForAnki(parts[pIdx], { mathFormat });
         }
         flds = parts.join("\x1f");
       } else {
-        flds = parts.map((p: string) => formatMarkdownForAnki(p)).join("\x1f");
+        flds = parts.map((p: string) => formatMarkdownForAnki(p, { mathFormat })).join("\x1f");
       }
     }
 
@@ -1038,7 +1081,7 @@ export async function createApkg(
   deckName: string,
   templateId: CardTemplateId = "default",
   customCss?: string,
-  options?: CreateApkgModelOptions,
+  options?: CreateApkgExportOptions,
 ): Promise<Blob> {
   const SQL = await initSqlJsInstance();
   const db = new SQL.Database();
@@ -1143,13 +1186,14 @@ export async function createApkg(
   ]);
 
   let idGen = deckId * 100;
+  const mathFormat: ExportMathFormat = options?.mathFormat ?? "katex";
 
   for (const card of cards) {
     const noteId = ++idGen;
-    const frontHTML = formatMarkdownForAnki(card.front);
-    const backHTML = formatMarkdownForAnki(card.back || "");
+    const frontHTML = formatMarkdownForAnki(card.front, { mathFormat });
+    const backHTML = formatMarkdownForAnki(card.back || "", { mathFormat });
     const extraFlds = customFieldNames.map((name) =>
-      formatMarkdownForAnki(getCustomFieldValue(card.customFields, name))
+      formatMarkdownForAnki(getCustomFieldValue(card.customFields, name), { mathFormat })
     );
     const flds = [frontHTML, backHTML, ...extraFlds].join("\x1f");
     
