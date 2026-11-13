@@ -69,6 +69,17 @@ const markdownBasicFront = `
         window.replaceInString = function(str) {
             if (!str) return "";
 
+            // Strip only the template's outer <pre> wrapper so inner <pre> blocks stay intact
+            str = str.replace(/^\\s*<pre[^>]*>|<\\/pre>\\s*$/gi, "");
+
+            // Protect fenced code blocks and inline code spans before HTML/math cleanup
+            var codePlaceholders = [];
+            str = str.replace(/\\x60{3}[\\s\\S]*?\\x60{3}|\\x60[^\\x60\\n]+\\x60/g, function(match) {
+                var idx = codePlaceholders.length;
+                codePlaceholders.push(match);
+                return "XSCHEDAEINITCODE" + idx + "X";
+            });
+
             // Convert Anki's native MathJax tags (handles block="1", block="true", bare block, inline, and stray backslashes)
             str = str.replace(/\\\\?<anki-mathjax\\b[^>]*?\\bblock(?:\\s*=\\s*["']?(?:1|true)["']?)?(?=[\\s>])[^>]*>([\\s\\S]*?)\\\\?<\\/anki-mathjax>/gi, function(_, m) {
                 return "\\n\\n$$" + m.trim() + "$$\\n\\n";
@@ -77,19 +88,22 @@ const markdownBasicFront = `
                 return "$" + m.trim() + "$";
             });
 
-            // Normalize double-escaped math delimiters: \\( -> \(, \\[ -> \[, \\) -> \), \\] -> \]
-            str = str.replace(/\\\\\\\\+([(\[])/g, "\\\\$1");
+            // Normalize double-escaped math delimiters: \\\\( -> \\(, \\\\[ -> \\[, \\\\) -> \\), \\\\] -> \\]
+            str = str.replace(/\\\\\\\\+([(\\[])/g, "\\\\$1");
             str = str.replace(/\\\\\\\\+([)\\]])/g, "\\\\$1");
 
-            // Strip editor HTML wrappers and line breaks
-            str = str.replace(/<[\\/]?pre[^>]*>/gi, "");
+            // Strip Anki editor line-break wrappers while keeping intentional HTML like <img> and <span>
             str = str.replace(/<br\\s*[\\/]?[^>]*>/gi, "\\n");
             str = str.replace(/<p[^>]*>/gi, "");
             str = str.replace(/<\\/p>/gi, "\\n");
             str = str.replace(/<div[^>]*>/gi, "");
             str = str.replace(/<\\/div[^>]*>/gi, "\\n");
-            str = str.replace(/<[\\/]?span[^>]*>/gi, "");
             str = str.replace(/(^|\\n) ([*+-]|\\d+\\.) /g, "$1$2 ");
+
+            // Restore code blocks before decoding HTML entities
+            str = str.replace(/XSCHEDAEINITCODE(\\d+)X/g, function(_, idx) {
+                return codePlaceholders[Number(idx)] || "";
+            });
 
             return window.replaceHTMLElementsInString(str);
         };
@@ -100,17 +114,25 @@ const markdownBasicFront = `
             str = str.replace(/&tab;/gi, "	");
             str = str.replace(/&gt;/gi, ">");
             str = str.replace(/&lt;/gi, "<");
-            str = str.replace(/&quot;/gi, '"');
             return str.replace(/&amp;/gi, "&");
         };
 
         window.applyRenderers = function(el) {
             if (!el) return;
 
+            var protectedChunks = [];
+            var katexChunks = [];
+            var text = window.replaceInString(el.innerHTML);
+
+            // Protect code blocks, inline code, and <img> tags so KaTeX auto-render skips their $ characters
+            text = text.replace(/\\x60{3}[\\s\\S]*?\\x60{3}|\\x60[^\\x60\\n]+\\x60|<img\\b[^>]*>/gi, function(match) {
+                var idx = protectedChunks.length;
+                protectedChunks.push(match);
+                return "XSCHEDAEP" + idx + "X";
+            });
+
             // 1. KaTeX Math rendering
             try {
-                let text = el.innerHTML;
-                text = window.replaceInString(text);
                 el.textContent = text;
                 if (typeof renderMathInElement !== "undefined") {
                     renderMathInElement(el, {
@@ -127,32 +149,58 @@ const markdownBasicFront = `
                 console.error("renderMath error", e);
             }
 
-            // 2. Markdown rendering (runs on el.innerHTML with KaTeX spans preserved)
+            // 2. Extract rendered KaTeX elements and plain text nodes separately so KaTeX HTML
+            //    never gets re-unescaped or parsed by markdown-it
+            var rebuilt = "";
+            if (el.childNodes && el.childNodes.length > 0) {
+                for (var i = 0; i < el.childNodes.length; i++) {
+                    var node = el.childNodes[i];
+                    if (node.nodeType === 1) {
+                        var kIdx = katexChunks.length;
+                        katexChunks.push(node.outerHTML);
+                        rebuilt += "XSCHEDAEK" + kIdx + "X";
+                    } else if (node.nodeType === 3) {
+                        rebuilt += node.nodeValue || "";
+                    }
+                }
+            } else {
+                rebuilt = text;
+            }
+
+            // Restore protected code blocks and <img> tags for markdown-it
+            rebuilt = rebuilt.replace(/XSCHEDAEP(\\d+)X/g, function(_, idx) {
+                return protectedChunks[Number(idx)] || "";
+            });
+
+            // 3. Markdown rendering (html: true preserves <img> and user HTML)
             try {
-                let text = window.replaceHTMLElementsInString(el.innerHTML);
                 if (typeof markdownit !== "undefined") {
                     let md = new markdownit({
-                        typographer: true, 
-                        html: true, 
+                        typographer: true,
+                        html: true,
                         highlight: function (str, lang) {
                             if (lang && typeof hljs !== "undefined" && hljs.getLanguage(lang)) {
                                 try { return hljs.highlight(str, { language: lang }).value; } catch (__) {}
                             }
-                            return ''; 
+                            return '';
                         }
                     });
                     if (typeof markdownItMark !== "undefined") {
                         md = md.use(markdownItMark);
                     }
-                    text = md.render(text);
-                    text = text.replace(/&lt;\\/span&gt;/gi, "\\\\");
+                    rebuilt = md.render(rebuilt);
                 } else {
-                    text = text.replace(/\\n/g, "<br>");
+                    rebuilt = rebuilt.replace(/\\n/g, "<br>");
                 }
-                el.innerHTML = text;
             } catch (e) {
                 console.error("markdown error", e);
             }
+
+            // Restore untouched KaTeX HTML elements
+            rebuilt = rebuilt.replace(/XSCHEDAEK(\\d+)X/g, function(_, idx) {
+                return katexChunks[Number(idx)] || "";
+            });
+            el.innerHTML = rebuilt;
         };
 
         window.renderAllFrontFields = function() {

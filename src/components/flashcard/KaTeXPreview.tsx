@@ -1,6 +1,6 @@
 import React from "react";
 import "katex/dist/katex.min.css";
-import { cn, dedentText } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -8,9 +8,8 @@ import rehypeKatex from "rehype-katex";
 import { useWorkspaceMediaResolver, type MediaUrlResolver } from "@/components/workspace/workspaceMediaContextValue";
 import { parseLocalMediaFilename } from "@/services/mediaStore/mediaUtils";
 
-import { normalizeMathMarkdown } from "@/utils/mathUtils";
 import { preparePreviewContent } from "@/utils/previewContent";
-export { normalizeMathMarkdown, preparePreviewContent };
+import { rehypeSafeInlineHtml } from "@/utils/rehypeSafeInlineHtml";
 
 /**
  * Renders markdown text with full formatting support (bold, line breaks, lists)
@@ -33,7 +32,7 @@ export function KaTeXRenderer({
     <div className={cn("leading-relaxed max-w-none", className)}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex]}
+        rehypePlugins={[rehypeSafeInlineHtml, rehypeKatex]}
         components={{
           p: ({ children }) => <div className="mb-2 last:mb-0">{children}</div>,
           pre: ({ children }) => <pre className="overflow-x-auto">{children}</pre>,
